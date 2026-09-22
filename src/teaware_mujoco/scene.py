@@ -410,6 +410,37 @@ def _add_xhand(
             "quat": _numbers(_rpy_quat([0.0, 0.0, -1.5707963])),
         },
     )
+    mesh_names: dict[Path, str] = {}
+    flange_mesh = _add_xhand_mesh_asset(asset, mesh_names, robot_id, "meshes/xhand_flange.STL")
+    ET.SubElement(
+        mount,
+        "inertial",
+        {
+            "pos": "0.0501712 0.0581654 0.0000145",
+            "mass": "0.4428072",
+            "fullinertia": "0.0002726 0.0002431 0.0002042 0 0 0.0000201",
+        },
+    )
+    _geom(
+        mount,
+        name=f"{robot_id}_xhand_flange_visual",
+        type="mesh",
+        mesh=flange_mesh,
+        rgba=[0.82352941, 0.87058824, 0.98039216, 1.0],
+        contype=0,
+        conaffinity=0,
+        mass=0,
+        group=2,
+    )
+    _geom(
+        mount,
+        name=f"{robot_id}_xhand_flange_collision",
+        type="mesh",
+        mesh=flange_mesh,
+        rgba=[0.0, 0.0, 0.0, 0.0],
+        friction=[0.9, 0.02, 0.001],
+        group=3,
+    )
     hand_rpy = [-1.5707963, 0.0, 3.1415926] if handedness == "left" else [1.5707963, 0.0, 0.0]
     palm = ET.SubElement(
         mount,
@@ -426,7 +457,7 @@ def _add_xhand(
         children=children,
         links=links,
         asset=asset,
-        mesh_names={},
+        mesh_names=mesh_names,
         robot_id=robot_id,
     )
 

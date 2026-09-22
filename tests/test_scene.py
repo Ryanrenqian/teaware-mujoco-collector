@@ -49,10 +49,11 @@ def test_xhand_scene_uses_real_meshes_and_handed_urdf_kinematics(tmp_path: Path)
 
     mesh_files = [Path(mesh.attrib["file"]) for mesh in root.findall("./asset/mesh")]
     xhand_meshes = [path for path in mesh_files if "assets/xhand/meshes" in path.as_posix()]
-    assert len(xhand_meshes) == 48
+    assert len(xhand_meshes) == 50
     assert all(path.is_file() for path in xhand_meshes)
     assert any(path.name == "right_hand_link.STL" for path in xhand_meshes)
     assert any(path.name == "left_hand_link.STL" for path in xhand_meshes)
+    assert sum(path.name == "xhand_flange.STL" for path in xhand_meshes) == 2
 
     bodies = {body.attrib["name"]: body for body in root.iter("body")}
     for robot_id, handedness, bend_y, bend_axis, thumb_quat in (
@@ -75,6 +76,11 @@ def test_xhand_scene_uses_real_meshes_and_handed_urdf_kinematics(tmp_path: Path)
         np.testing.assert_allclose(
             np.fromstring(mount.attrib["pos"], sep=" "), [0.007, 0.05, 0.005]
         )
+        inertial = mount.find("inertial")
+        assert inertial.attrib["mass"] == "0.4428072"
+        assert mount.find(f"geom[@name='{robot_id}_xhand_flange_visual']") is not None
+        assert mount.find(f"geom[@name='{robot_id}_xhand_flange_collision']") is not None
+        assert mount.find(f"body[@name='{robot_id}_{handedness}_hand_link']") is not None
 
         bend = bodies[f"{robot_id}_{handedness}_hand_thumb_bend_link"]
         np.testing.assert_allclose(

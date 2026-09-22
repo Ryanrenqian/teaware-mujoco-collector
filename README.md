@@ -67,7 +67,7 @@ src/teaware_mujoco/
   web.py                               FastAPI 和图像/episode API
   static/                              无构建步骤的网页前端
   assets/ufactory_xarm7/               vendored xArm7 MJCF、mesh、上游许可证
-  assets/xhand/                        左右 xHand URDF、STL 视觉与 OBJ 凸包资产
+  assets/xhand/                        左右 xHand URDF、法兰、STL 视觉与 OBJ 凸包资产
 tests/                                 配置、MJCF、采集和网页回归测试
 data/                                  默认输出，Git 忽略
 ```
@@ -165,7 +165,7 @@ uv run teaware-mj audit-release --root .
 ## 当前边界
 
 - 这是场景/传感器数据采集仓库，不包含抓取策略、逆运动学、厂商 SDK 或真机控制。
-- xHand 从随仓库发布的左右手 URDF 生成 MJCF，保留原始 mesh、惯量、关节原点、轴向、限位和双臂安装变换；MuJoCo position actuator 增益属于本采集环境参数。
+- xHand 从随仓库发布的左右手 URDF 生成 MJCF，保留原始法兰、mesh、惯量、关节原点、轴向、限位和双臂安装变换；MuJoCo position actuator 增益属于本采集环境参数。
 - 茶具是参数化近似几何体；替换 mesh 时应同时核对单位、质心、惯量和碰撞简化。
 - 当前随机化覆盖平面位置和 yaw；材质、光照、相机扰动可以继续在 `scene.py` 和 YAML schema 中扩展。
 - `depth_preview.png` 使用逐帧百分位拉伸，只适合人工查看；算法必须读取 `depth.npy`。
