@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .robots import XHAND_JOINT_SUFFIXES, XHAND_LOWER, XHAND_UPPER
+from .robots import XHAND_JOINT_SUFFIXES
 
 
 def _numbers(values: list[float] | np.ndarray) -> str:
@@ -173,6 +173,10 @@ def xarm_asset_dir() -> Path:
     return Path(str(files("teaware_mujoco").joinpath("assets", "ufactory_xarm7")))
 
 
+def xhand_asset_dir() -> Path:
+    return Path(str(files("teaware_mujoco").joinpath("assets", "xhand")))
+
+
 _REFERENCE_ATTRIBUTES = {
     "body1",
     "body2",
@@ -219,182 +223,232 @@ def _namespace_template(template: ET.Element, prefix: str) -> None:
                 element.set(attribute, prefix + element.attrib[attribute])
 
 
-def _joint(
+def _xyz(element: ET.Element | None, attribute: str, default: str = "0 0 0") -> list[float]:
+    if element is None:
+        return [float(value) for value in default.split()]
+    return [float(value) for value in element.get(attribute, default).split()]
+
+
+def _rpy_quat(rpy: list[float]) -> list[float]:
+    roll, pitch, yaw = rpy
+    cr, sr = math.cos(roll / 2.0), math.sin(roll / 2.0)
+    cp, sp = math.cos(pitch / 2.0), math.sin(pitch / 2.0)
+    cy, sy = math.cos(yaw / 2.0), math.sin(yaw / 2.0)
+    return [
+        cr * cp * cy + sr * sp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+    ]
+
+
+def _origin_attributes(origin: ET.Element | None) -> dict[str, str]:
+    return {
+        "pos": _numbers(_xyz(origin, "xyz")),
+        "quat": _numbers(_rpy_quat(_xyz(origin, "rpy"))),
+    }
+
+
+def _add_xhand_mesh_asset(
+    asset: ET.Element,
+    mesh_names: dict[Path, str],
+    robot_id: str,
+    filename: str,
+) -> str:
+    mesh_path = (xhand_asset_dir() / filename).resolve()
+    if not mesh_path.is_file():
+        raise FileNotFoundError(f"xHand mesh does not exist: {mesh_path}")
+    if mesh_path not in mesh_names:
+        mesh_name = f"{robot_id}_xhand_mesh_{len(mesh_names):02d}_{mesh_path.stem}"
+        ET.SubElement(asset, "mesh", {"name": mesh_name, "file": str(mesh_path)})
+        mesh_names[mesh_path] = mesh_name
+    return mesh_names[mesh_path]
+
+
+def _add_xhand_geometry(
     body: ET.Element,
-    *,
-    name: str,
-    axis: list[float],
-    lower: float,
-    upper: float,
+    asset: ET.Element,
+    mesh_names: dict[Path, str],
+    robot_id: str,
+    link_name: str,
+    geometry_kind: str,
+    geometry_index: int,
+    source: ET.Element,
 ) -> None:
-    ET.SubElement(
-        body,
-        "joint",
-        {
-            "name": name,
-            "type": "hinge",
-            "axis": _numbers(axis),
-            "range": _numbers([lower, upper]),
-            "damping": "0.12",
-            "armature": "0.002",
-        },
-    )
+    geometry = source.find("geometry")
+    if geometry is None:
+        return
+    suffix = geometry_kind if geometry_index == 0 else f"{geometry_kind}_{geometry_index}"
+    attributes = {
+        "name": f"{robot_id}_{link_name}_{suffix}",
+        **_origin_attributes(source.find("origin")),
+        "group": "2" if geometry_kind == "visual" else "3",
+    }
+    mesh = geometry.find("mesh")
+    box = geometry.find("box")
+    if mesh is not None:
+        attributes.update(
+            type="mesh",
+            mesh=_add_xhand_mesh_asset(asset, mesh_names, robot_id, mesh.attrib["filename"]),
+        )
+    elif box is not None:
+        attributes.update(
+            type="box",
+            size=_numbers(np.asarray(_xyz(box, "size"), dtype=np.float64) / 2.0),
+        )
+    else:
+        raise ValueError(f"unsupported xHand geometry on link {link_name}")
+
+    if geometry_kind == "visual":
+        color = source.find("./material/color")
+        attributes.update(contype="0", conaffinity="0", mass="0")
+        if color is not None:
+            attributes["rgba"] = color.get("rgba", "0.8 0.8 0.8 1")
+    else:
+        attributes.update(rgba="0 0 0 0", friction="0.9 0.02 0.001")
+    ET.SubElement(body, "geom", attributes)
 
 
-def _finger_segment(
-    parent: ET.Element,
+def _populate_xhand_link(
     *,
-    name: str,
-    joint_name: str,
-    position: list[float],
-    length: float,
-    lower: float,
-    upper: float,
-    rgba: list[float],
-    axis: list[float] | None = None,
-) -> ET.Element:
-    body = ET.SubElement(parent, "body", {"name": name, "pos": _numbers(position)})
-    _joint(
-        body,
-        name=joint_name,
-        axis=axis or [1.0, 0.0, 0.0],
-        lower=lower,
-        upper=upper,
-    )
-    _geom(
-        body,
-        name=f"{name}_geom",
-        type="capsule",
-        fromto=[0.0, 0.0, 0.0, 0.0, 0.0, length],
-        size=[0.009],
-        rgba=rgba,
-        density=550,
-        friction=[0.9, 0.02, 0.001],
-    )
-    return body
+    body: ET.Element,
+    link: ET.Element,
+    children: dict[str, list[ET.Element]],
+    links: dict[str, ET.Element],
+    asset: ET.Element,
+    mesh_names: dict[Path, str],
+    robot_id: str,
+) -> None:
+    link_name = link.attrib["name"]
+    inertial = link.find("inertial")
+    if inertial is not None:
+        mass = inertial.find("mass")
+        inertia = inertial.find("inertia")
+        if mass is not None and inertia is not None:
+            inertial_origin = inertial.find("origin")
+            inertial_rpy = _xyz(inertial_origin, "rpy")
+            if not np.allclose(inertial_rpy, 0.0):
+                raise ValueError(f"xHand link {link_name} has an unsupported rotated inertia frame")
+            ET.SubElement(
+                body,
+                "inertial",
+                {
+                    "pos": _numbers(_xyz(inertial_origin, "xyz")),
+                    "mass": mass.attrib["value"],
+                    "fullinertia": " ".join(
+                        inertia.attrib[key] for key in ("ixx", "iyy", "izz", "ixy", "ixz", "iyz")
+                    ),
+                },
+            )
+    for index, visual in enumerate(link.findall("visual")):
+        _add_xhand_geometry(body, asset, mesh_names, robot_id, link_name, "visual", index, visual)
+    for index, collision in enumerate(link.findall("collision")):
+        _add_xhand_geometry(
+            body, asset, mesh_names, robot_id, link_name, "collision", index, collision
+        )
+
+    for urdf_joint in children.get(link_name, []):
+        child_name = urdf_joint.find("child").attrib["link"]
+        child_body = ET.SubElement(
+            body,
+            "body",
+            {
+                "name": f"{robot_id}_{child_name}",
+                **_origin_attributes(urdf_joint.find("origin")),
+            },
+        )
+        if urdf_joint.get("type") != "fixed":
+            limit = urdf_joint.find("limit")
+            dynamics = urdf_joint.find("dynamics")
+            joint_attributes = {
+                "name": f"{robot_id}_{urdf_joint.attrib['name']}",
+                "type": "hinge",
+                "axis": _numbers(_xyz(urdf_joint.find("axis"), "xyz", "1 0 0")),
+                "range": f"{limit.attrib['lower']} {limit.attrib['upper']}",
+            }
+            if dynamics is not None:
+                joint_attributes["damping"] = dynamics.get("damping", "0")
+                joint_attributes["frictionloss"] = dynamics.get("friction", "0")
+            ET.SubElement(child_body, "joint", joint_attributes)
+        _populate_xhand_link(
+            body=child_body,
+            link=links[child_name],
+            children=children,
+            links=links,
+            asset=asset,
+            mesh_names=mesh_names,
+            robot_id=robot_id,
+        )
 
 
 def _add_xhand(
     link7: ET.Element,
+    asset: ET.Element,
     actuator: ET.Element,
     robot_id: str,
     handedness: str,
 ) -> None:
-    prefix = f"{robot_id}_{handedness}_hand_"
-    mirror = -1.0 if handedness == "left" else 1.0
-    rgba = [0.15, 0.19, 0.22, 1.0] if handedness == "left" else [0.18, 0.22, 0.26, 1.0]
-    palm = ET.SubElement(
+    urdf = ET.parse(xhand_asset_dir() / f"xhand_{handedness}_extended.urdf").getroot()
+    links = {link.attrib["name"]: link for link in urdf.findall("link")}
+    root_link_name = f"{handedness}_hand_link"
+    children: dict[str, list[ET.Element]] = {}
+    hand_joints: dict[str, ET.Element] = {}
+    for joint in urdf.findall("joint"):
+        parent_name = joint.find("parent").attrib["link"]
+        child_name = joint.find("child").attrib["link"]
+        if parent_name in links and child_name in links:
+            children.setdefault(parent_name, []).append(joint)
+        if joint.attrib["name"].startswith(f"{handedness}_hand_"):
+            hand_joints[joint.attrib["name"]] = joint
+
+    mount = ET.SubElement(
         link7,
         "body",
-        {"name": f"{prefix}link", "pos": "0 0 0.045"},
+        {
+            "name": f"{robot_id}_xhand_mount",
+            "pos": "0.007 0.05 0.005",
+            "quat": _numbers(_rpy_quat([0.0, 0.0, -1.5707963])),
+        },
     )
-    _geom(
-        palm,
-        name=f"{prefix}palm_geom",
-        type="box",
-        pos=[0.0, 0.0, 0.025],
-        size=[0.044, 0.035, 0.025],
-        rgba=rgba,
-        density=650,
-        friction=[0.9, 0.02, 0.001],
+    hand_rpy = [-1.5707963, 0.0, 3.1415926] if handedness == "left" else [1.5707963, 0.0, 0.0]
+    palm = ET.SubElement(
+        mount,
+        "body",
+        {
+            "name": f"{robot_id}_{root_link_name}",
+            "pos": "0.05 0.045 0.1",
+            "quat": _numbers(_rpy_quat(hand_rpy)),
+        },
     )
-
-    names = [f"{prefix}{suffix}" for suffix in XHAND_JOINT_SUFFIXES]
-    thumb0 = _finger_segment(
-        palm,
-        name=f"{prefix}thumb_bend_link",
-        joint_name=names[0],
-        position=[mirror * 0.043, -0.012, 0.015],
-        length=0.034,
-        lower=XHAND_LOWER[0],
-        upper=XHAND_UPPER[0],
-        rgba=rgba,
-        axis=[0.0, mirror, 0.0],
+    _populate_xhand_link(
+        body=palm,
+        link=links[root_link_name],
+        children=children,
+        links=links,
+        asset=asset,
+        mesh_names={},
+        robot_id=robot_id,
     )
-    thumb1 = _finger_segment(
-        thumb0,
-        name=f"{prefix}thumb_rota_link1",
-        joint_name=names[1],
-        position=[0.0, 0.0, 0.034],
-        length=0.04,
-        lower=XHAND_LOWER[1],
-        upper=XHAND_UPPER[1],
-        rgba=rgba,
-        axis=[1.0, 0.0, 0.0],
-    )
-    _finger_segment(
-        thumb1,
-        name=f"{prefix}thumb_rota_link2",
-        joint_name=names[2],
-        position=[0.0, 0.0, 0.04],
-        length=0.034,
-        lower=XHAND_LOWER[2],
-        upper=XHAND_UPPER[2],
-        rgba=rgba,
-    )
-
-    finger_specs = (
-        ("index", mirror * 0.029, 0.062, 3, True),
-        ("mid", mirror * 0.010, 0.066, 6, False),
-        ("ring", mirror * -0.010, 0.064, 8, False),
-        ("pinky", mirror * -0.029, 0.056, 10, False),
-    )
-    for finger, x_position, first_length, start, has_abduction in finger_specs:
-        parent = palm
-        if has_abduction:
-            parent = _finger_segment(
-                parent,
-                name=f"{prefix}{finger}_bend_link",
-                joint_name=names[start],
-                position=[x_position, 0.0, 0.047],
-                length=0.012,
-                lower=XHAND_LOWER[start],
-                upper=XHAND_UPPER[start],
-                rgba=rgba,
-                axis=[0.0, 1.0, 0.0],
-            )
-            start += 1
-            position = [0.0, 0.0, 0.012]
-        else:
-            position = [x_position, 0.0, 0.047]
-        proximal = _finger_segment(
-            parent,
-            name=f"{prefix}{finger}_link1",
-            joint_name=names[start],
-            position=position,
-            length=first_length,
-            lower=XHAND_LOWER[start],
-            upper=XHAND_UPPER[start],
-            rgba=rgba,
-        )
-        _finger_segment(
-            proximal,
-            name=f"{prefix}{finger}_link2",
-            joint_name=names[start + 1],
-            position=[0.0, 0.0, first_length],
-            length=0.042,
-            lower=XHAND_LOWER[start + 1],
-            upper=XHAND_UPPER[start + 1],
-            rgba=rgba,
-        )
 
     ET.SubElement(
         palm,
         "site",
-        {"name": f"{robot_id}_hand_tcp", "pos": "0 0 0.16", "size": "0.004"},
+        {"name": f"{robot_id}_hand_tcp", "pos": "0 0 -0.065", "size": "0.004"},
     )
-    for index, (joint_name, lower, upper) in enumerate(
-        zip(names, XHAND_LOWER, XHAND_UPPER), start=1
-    ):
+    for index, suffix in enumerate(XHAND_JOINT_SUFFIXES, start=1):
+        urdf_joint = hand_joints[f"{handedness}_hand_{suffix}"]
+        limit = urdf_joint.find("limit")
+        lower, upper = limit.attrib["lower"], limit.attrib["upper"]
+        effort = float(limit.attrib["effort"])
         ET.SubElement(
             actuator,
             "position",
             {
                 "name": f"{robot_id}_xhand_act{index:02d}",
-                "joint": joint_name,
+                "joint": f"{robot_id}_{urdf_joint.attrib['name']}",
                 "kp": "18",
-                "ctrlrange": _numbers([lower, upper]),
-                "forcerange": "-3 3",
+                "ctrlrange": f"{lower} {upper}",
+                "forcerange": _numbers([-effort, effort]),
             },
         )
 
@@ -435,7 +489,7 @@ def _append_robot(
     base.set("quat", _numbers([math.cos(half_yaw), 0.0, 0.0, math.sin(half_yaw)]))
     if spec["hand"] == "xhand":
         link7 = next(body for body in base.iter("body") if body.get("name") == f"{prefix}link7")
-        _add_xhand(link7, actuator, spec["id"], spec["handedness"])
+        _add_xhand(link7, asset, actuator, spec["id"], spec["handedness"])
     worldbody.append(base)
 
     for section_name, destination in (

@@ -2,7 +2,7 @@
 
 一个可独立运行的 MuJoCo 茶具场景数据采集仓库。它将场景定义、随机化、传感器采集、数据契约和网页检查放在同一套小型工具中，不依赖 `waic-demo4` 的 Python 包或运行目录。
 
-当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及参数化茶壶、茶杯、公道杯和茶叶罐。xHand 使用与原控制栈一致的 12 关节顺序和限位，由 MuJoCo 基础几何体程序化生成；仓库不包含来源未确认的厂商 mesh、SDK 或真机配置。
+当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及参数化茶壶、茶杯、公道杯和茶叶罐。xHand 使用原项目中的左右手 URDF、视觉/碰撞 mesh、惯量、关节轴和限位，并保持与原控制栈一致的 12 关节顺序；仓库不包含 SDK 或真机配置。
 
 ## 快速开始
 
@@ -67,6 +67,7 @@ src/teaware_mujoco/
   web.py                               FastAPI 和图像/episode API
   static/                              无构建步骤的网页前端
   assets/ufactory_xarm7/               vendored xArm7 MJCF、mesh、上游许可证
+  assets/xhand/                        左右 xHand URDF、STL 视觉与 OBJ 凸包资产
 tests/                                 配置、MJCF、采集和网页回归测试
 data/                                  默认输出，Git 忽略
 ```
@@ -164,11 +165,11 @@ uv run teaware-mj audit-release --root .
 ## 当前边界
 
 - 这是场景/传感器数据采集仓库，不包含抓取策略、逆运动学、厂商 SDK 或真机控制。
-- 程序化 xHand 保留 q12 接口与运动学结构，用于数据管线和算法联调，不宣称复刻厂商 mesh、惯量或接触参数。
+- xHand 从随仓库发布的左右手 URDF 生成 MJCF，保留原始 mesh、惯量、关节原点、轴向、限位和双臂安装变换；MuJoCo position actuator 增益属于本采集环境参数。
 - 茶具是参数化近似几何体；替换 mesh 时应同时核对单位、质心、惯量和碰撞简化。
 - 当前随机化覆盖平面位置和 yaw；材质、光照、相机扰动可以继续在 `scene.py` 和 YAML schema 中扩展。
 - `depth_preview.png` 使用逐帧百分位拉伸，只适合人工查看；算法必须读取 `depth.npy`。
 
 ## 第三方资产
 
-`src/teaware_mujoco/assets/ufactory_xarm7/` 来自 MuJoCo Menagerie 的 UFACTORY xArm7 模型，使用 BSD-3-Clause License；上游 `LICENSE`、`README.md` 和 `CHANGELOG.md` 已原样保留。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `docs/PUBLIC_RELEASE.md`。仓库没有复制 `waic-demo4` 的厂商 xHand mesh/SDK、业务代码或运行数据。
+`src/teaware_mujoco/assets/ufactory_xarm7/` 来自 MuJoCo Menagerie 的 UFACTORY xArm7 模型，使用 BSD-3-Clause License；上游 `LICENSE`、`README.md` 和 `CHANGELOG.md` 已原样保留。`src/teaware_mujoco/assets/xhand/` 包含原项目使用的 xHand URDF 与 mesh。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `docs/PUBLIC_RELEASE.md`。仓库不包含 xHand SDK、业务代码或运行数据。

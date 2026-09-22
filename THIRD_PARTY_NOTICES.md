@@ -7,13 +7,12 @@ model distributed with MuJoCo Menagerie. It is redistributed under the
 BSD-3-Clause license included at
 `src/teaware_mujoco/assets/ufactory_xarm7/LICENSE`.
 
-## xHand compatibility model
+## xHand model assets
 
-The xHand scene in this repository is a programmatic approximation made from
-MuJoCo primitive geometry. Its 12 control coordinates follow the joint ordering
-and public integration contract used by the associated research code. This
-repository does **not** redistribute vendor STL/OBJ files, SDK binaries, serial
-numbers, calibration files, or hardware connection settings.
+`src/teaware_mujoco/assets/xhand/` contains the left/right extended URDF files,
+STL visual meshes, and OBJ convex-hull meshes used by the source research
+project. The repository owner authorized their inclusion in this public
+repository. No separate upstream license file was supplied with these assets.
 
-An externally supplied visual/collision asset pack must not be committed until
-its redistribution license and source notice are added here.
+The xHand SDK, serial numbers, calibration files, and hardware connection
+settings are not included.

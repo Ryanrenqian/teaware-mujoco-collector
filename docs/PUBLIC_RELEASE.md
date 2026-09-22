@@ -17,6 +17,7 @@ machine names, camera serial numbers, physical addresses, and proprietary
 objects. Publish large approved datasets as versioned release artifacts or in a
 dataset registry rather than adding them to the source tree.
 
-The included xHand is a procedural compatibility model. Do not copy the xHand
-meshes or SDK from `waic-demo4` into this public repository until the owner has
-documented an explicit redistribution license.
+The xHand URDF, STL, and convex-hull OBJ assets are intentionally included under
+`src/teaware_mujoco/assets/xhand/` with repository-owner authorization. The
+xHand SDK, hardware identifiers, calibration, and connection settings remain
+out of scope for public release.

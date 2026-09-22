@@ -40,6 +40,9 @@ teaware_mujoco = [
   "static/*",
   "assets/ufactory_xarm7/*",
   "assets/ufactory_xarm7/assets/*.stl",
+  "assets/xhand/*.urdf",
+  "assets/xhand/meshes/*.STL",
+  "assets/xhand/meshes/*.obj",
 ]
 
 [tool.pytest.ini_options]
