@@ -1,0 +1,67 @@
+simulation:
+  timestep: 0.002
+  settle_s: 0.5
+  duration_s: 1.0
+  capture_fps: 10
+
+renderer:
+  width: 640
+  height: 480
+
+table:
+  # Full extents in metres. center.z + size.z / 2 is the support height.
+  center: [0.42, 0.0, -0.035]
+  size: [1.05, 0.82, 0.06]
+  rgba: [0.42, 0.30, 0.20, 1.0]
+
+robot:
+  home_q: [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
+  motion_amplitude: [0.04, 0.025, 0.04, 0.03, 0.03, 0.03, 0.04]
+
+randomization:
+  minimum_object_distance: 0.13
+  max_placement_attempts: 200
+
+cameras:
+  - name: front_left
+    position: [1.10, -0.92, 0.82]
+    target: [0.43, 0.0, 0.06]
+    fovy: 48
+  - name: front_right
+    position: [1.05, 0.92, 0.76]
+    target: [0.43, 0.0, 0.06]
+    fovy: 48
+  - name: overhead
+    position: [0.43, 0.0, 1.35]
+    target: [0.43, 0.0, 0.0]
+    fovy: 42
+
+objects:
+  - name: red_teapot
+    preset: teapot
+    rgba: [0.62, 0.11, 0.08, 1.0]
+    randomization:
+      x: [0.25, 0.48]
+      y: [-0.22, 0.22]
+      yaw_deg: [-180, 180]
+  - name: white_teacup
+    preset: teacup
+    rgba: [0.88, 0.87, 0.80, 1.0]
+    randomization:
+      x: [0.42, 0.67]
+      y: [-0.22, 0.22]
+      yaw_deg: [-180, 180]
+  - name: celadon_pitcher
+    preset: pitcher
+    rgba: [0.36, 0.58, 0.50, 1.0]
+    randomization:
+      x: [0.28, 0.66]
+      y: [-0.22, 0.22]
+      yaw_deg: [-180, 180]
+  - name: tea_canister
+    preset: canister
+    rgba: [0.73, 0.58, 0.30, 1.0]
+    randomization:
+      x: [0.25, 0.66]
+      y: [-0.22, 0.22]
+      yaw_deg: [-180, 180]
