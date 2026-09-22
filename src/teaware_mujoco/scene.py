@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from .robots import XHAND_JOINT_SUFFIXES
+from .teaware_assets import effective_mass_kg, get_teaware_asset, teaware_asset_dir
 
 
 def _numbers(values: list[float] | np.ndarray) -> str:
@@ -73,7 +74,78 @@ def _add_handle(body: ET.Element, radius: float, z: float, rgba: list[float], pr
     )
 
 
-def _add_teaware_body(worldbody: ET.Element, spec: dict[str, Any], table_top: float) -> None:
+def _add_mesh_teaware_body(
+    asset: ET.Element,
+    body: ET.Element,
+    spec: dict[str, Any],
+) -> None:
+    name = spec["name"]
+    rgba = spec["rgba"]
+    metadata = get_teaware_asset(spec["asset_id"])
+    asset_root = teaware_asset_dir()
+    extents = [float(value) for value in metadata["extents_m"]]
+    mass = effective_mass_kg(metadata)
+    x, y, z = extents
+    inertia = [
+        mass * (y * y + z * z) / 12.0,
+        mass * (x * x + z * z) / 12.0,
+        mass * (x * x + y * y) / 12.0,
+    ]
+    ET.SubElement(
+        body,
+        "inertial",
+        {
+            "pos": _numbers([0.0, 0.0, z / 2.0]),
+            "mass": f"{mass:.9g}",
+            "diaginertia": _numbers(inertia),
+        },
+    )
+
+    visual_mesh_name = f"{name}_visual_mesh"
+    ET.SubElement(
+        asset,
+        "mesh",
+        {"name": visual_mesh_name, "file": str((asset_root / metadata["visual"]).resolve())},
+    )
+    _geom(
+        body,
+        name=f"{name}_visual",
+        type="mesh",
+        mesh=visual_mesh_name,
+        rgba=rgba,
+        group=2,
+        contype=0,
+        conaffinity=0,
+        mass=0,
+    )
+
+    for index, relative_path in enumerate(metadata["collisions"]):
+        mesh_name = f"{name}_collision_mesh_{index:02d}"
+        ET.SubElement(
+            asset,
+            "mesh",
+            {"name": mesh_name, "file": str((asset_root / relative_path).resolve())},
+        )
+        _geom(
+            body,
+            name=f"{name}_collision_{index:02d}",
+            type="mesh",
+            mesh=mesh_name,
+            rgba=[0, 0, 0, 0],
+            group=3,
+            contype=1,
+            conaffinity=1,
+            density=0,
+            friction=[0.8, 0.02, 0.001],
+        )
+
+
+def _add_teaware_body(
+    asset: ET.Element,
+    worldbody: ET.Element,
+    spec: dict[str, Any],
+    table_top: float,
+) -> None:
     name = spec["name"]
     preset = spec["preset"]
     rgba = spec["rgba"]
@@ -81,6 +153,10 @@ def _add_teaware_body(worldbody: ET.Element, spec: dict[str, Any], table_top: fl
         worldbody, "body", {"name": name, "pos": _numbers([0.4, 0.0, table_top + 0.12])}
     )
     ET.SubElement(body, "freejoint", {"name": f"{name}_free"})
+
+    if spec.get("asset_id"):
+        _add_mesh_teaware_body(asset, body, spec)
+        return
 
     if preset == "teapot":
         _geom(
@@ -681,7 +757,7 @@ def build_scene_tree(config: dict[str, Any]) -> ET.ElementTree:
         )
 
     for object_spec in config["objects"]:
-        _add_teaware_body(worldbody, object_spec, table_top)
+        _add_teaware_body(asset, worldbody, object_spec, table_top)
     for camera in config["cameras"]:
         ET.SubElement(
             worldbody,
@@ -710,9 +786,11 @@ def table_top_z(config: dict[str, Any]) -> float:
     return float(table["center"][2]) + float(table["size"][2]) / 2.0
 
 
-def object_spawn_height(preset: str, top_z: float) -> float:
+def object_spawn_height(spec: dict[str, Any], top_z: float) -> float:
+    if spec.get("asset_id"):
+        return top_z + 0.025
     half_heights = {"teapot": 0.05, "teacup": 0.035, "pitcher": 0.06, "canister": 0.065}
-    return top_z + half_heights[preset] + 0.025
+    return top_z + half_heights[spec["preset"]] + 0.025
 
 
 def yaw_quaternion(yaw_deg: float) -> np.ndarray:

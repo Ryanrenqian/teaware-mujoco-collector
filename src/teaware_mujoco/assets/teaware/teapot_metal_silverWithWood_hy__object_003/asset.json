@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_metal_silverWithWood_hy__object_003",
+  "family": "teapot_metal_silverWithWood_hy",
+  "instance": "object_003",
+  "split": "validation",
+  "source": "teapot_metal_silverWithWood_hy/object_003/object_resized.glb",
+  "source_sha256": "d9a70b2ea5668a6b9345c69ec23465101d886929d305828477ac11aa04b2f1eb",
+  "source_manifest_sha256": "ef4443b357c86f59633ff3d6bbf85f34a131ea717ca26f4a413d017a7ff54005",
+  "visual": "teapot_metal_silverWithWood_hy__object_003/visual.obj",
+  "collisions": [
+    "teapot_metal_silverWithWood_hy__object_003/collision_00.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_01.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_02.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_03.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_04.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_05.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_06.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_07.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_08.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_09.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_10.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_11.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_12.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_13.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_14.obj",
+    "teapot_metal_silverWithWood_hy__object_003/collision_15.obj"
+  ],
+  "extents_m": [
+    0.10646631769558058,
+    0.10425535016108975,
+    0.05181682109832764
+  ],
+  "mass_kg": 0.36234468916749274,
+  "mesh_volume_m3": 0.00020130260509305153,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}

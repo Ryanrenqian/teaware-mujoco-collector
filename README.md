@@ -2,7 +2,7 @@
 
 一个可独立运行的 MuJoCo 茶具场景数据采集仓库。它将场景定义、随机化、传感器采集、数据契约和网页检查放在同一套小型工具中，不依赖 `waic-demo4` 的 Python 包或运行目录。
 
-当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及参数化茶壶、茶杯、公道杯和茶叶罐。xHand 使用原项目中的左右手 URDF、视觉/碰撞 mesh、惯量、关节轴和限位，并保持与原控制栈一致的 12 关节顺序；仓库不包含 SDK 或真机配置。
+当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及 10 套、40 件真实茶具模型。每件茶具使用原始视觉 OBJ 和 16 个凸碰撞 OBJ；默认场景加载 `teapot_porcelain_red` 四件套。xHand 使用原项目中的左右手 URDF、视觉/碰撞 mesh、惯量、关节轴和限位，并保持与原控制栈一致的 12 关节顺序；仓库不包含 SDK 或真机配置。
 
 ## 快速开始
 
@@ -68,6 +68,7 @@ src/teaware_mujoco/
   static/                              无构建步骤的网页前端
   assets/ufactory_xarm7/               vendored xArm7 MJCF、mesh、上游许可证
   assets/xhand/                        左右 xHand URDF、法兰、STL 视觉与 OBJ 凸包资产
+  assets/teaware/                      10 套茶具的视觉/碰撞 OBJ、catalog 和物理 profile
 tests/                                 配置、MJCF、采集和网页回归测试
 data/                                  默认输出，Git 忽略
 ```
@@ -91,10 +92,12 @@ YAML 中的长度均为米、角度为度。主要字段：
 - `scene_profile`: 数据中记录的场景标识；
 - `robots`: 一台或多台机械臂的 id、手型、左右手、基座位姿、arm/hand home joint 和运动幅度；
 - `cameras`: 固定相机位置、观察目标和垂直视场角；
-- `objects`: 茶具 preset、颜色与平面随机范围；
+- `objects`: 茶具 preset、可选 `asset_id`、颜色与平面随机范围；
 - `randomization`: 物体中心最小间距和最大重采样次数。
 
 配置在启动时严格校验。向已有 dataset 写入时，配置哈希必须与 `dataset.json` 一致，避免把不同相机、分辨率或物理参数的数据静默混在一起。需要换配置时应使用新的 dataset 目录。
+
+默认四件套的 `asset_id` 分别为 `teapot_porcelain_red__object_000` 至 `object_003`，对应茶壶、茶杯、公道杯和茶叶罐。`assets/teaware/catalog.json` 列出全部 40 个可用 id；替换 YAML 中的 id 即可切换茶具，同一对象的 `name` 无需改变，因此 trajectory 和 instance label 契约保持稳定。不写 `asset_id` 时仍可使用旧的参数化 preset。
 
 ## 数据契约
 
@@ -166,10 +169,12 @@ uv run teaware-mj audit-release --root .
 
 - 这是场景/传感器数据采集仓库，不包含抓取策略、逆运动学、厂商 SDK 或真机控制。
 - xHand 从随仓库发布的左右手 URDF 生成 MJCF，保留原始法兰、mesh、惯量、关节原点、轴向、限位和双臂安装变换；MuJoCo position actuator 增益属于本采集环境参数。
-- 茶具是参数化近似几何体；替换 mesh 时应同时核对单位、质心、惯量和碰撞简化。
+- 茶具 catalog 的质量是估计值；仿真按 `assets/teaware/physics_profile.json` 等比缩放并将单件质量限制在 100 g。视觉颜色继续由 YAML `rgba` 控制。
 - 当前随机化覆盖平面位置和 yaw；材质、光照、相机扰动可以继续在 `scene.py` 和 YAML schema 中扩展。
 - `depth_preview.png` 使用逐帧百分位拉伸，只适合人工查看；算法必须读取 `depth.npy`。
 
 ## 第三方资产
 
 `src/teaware_mujoco/assets/ufactory_xarm7/` 来自 MuJoCo Menagerie 的 UFACTORY xArm7 模型，使用 BSD-3-Clause License；上游 `LICENSE`、`README.md` 和 `CHANGELOG.md` 已原样保留。`src/teaware_mujoco/assets/xhand/` 包含原项目使用的 xHand URDF 与 mesh。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `docs/PUBLIC_RELEASE.md`。仓库不包含 xHand SDK、业务代码或运行数据。
+
+`src/teaware_mujoco/assets/teaware/` 包含 10 套真实茶具的预处理 OBJ、凸碰撞网格和 catalog；资产已转换为 Z-up、XY 居中且最低点为 `z=0`。

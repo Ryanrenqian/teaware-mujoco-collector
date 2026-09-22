@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_porcelain_darkGreen__object_000",
+  "family": "teapot_porcelain_darkGreen",
+  "instance": "object_000",
+  "split": "held_out",
+  "source": "teapot_porcelain_darkGreen/object_000/object_resized.glb",
+  "source_sha256": "37a9aa58dbf9bdf34ac21b422eaae5d197b05dc3c2ba49424a5f3440d1ec5188",
+  "source_manifest_sha256": "9c7af7a81eb2cea9215de63a373c68e46035f7a042bac7919cffb7230b161777",
+  "visual": "teapot_porcelain_darkGreen__object_000/visual.obj",
+  "collisions": [
+    "teapot_porcelain_darkGreen__object_000/collision_00.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_01.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_02.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_03.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_04.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_05.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_06.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_07.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_08.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_09.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_10.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_11.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_12.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_13.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_14.obj",
+    "teapot_porcelain_darkGreen__object_000/collision_15.obj"
+  ],
+  "extents_m": [
+    0.0931204724531328,
+    0.09279047824900272,
+    0.09474797546863556
+  ],
+  "mass_kg": 0.5157735564578094,
+  "mesh_volume_m3": 0.000286540864698783,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}

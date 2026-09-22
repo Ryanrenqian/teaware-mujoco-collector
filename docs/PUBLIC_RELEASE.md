@@ -21,3 +21,7 @@ The xHand URDF, STL, and convex-hull OBJ assets are intentionally included under
 `src/teaware_mujoco/assets/xhand/` with repository-owner authorization. The
 xHand SDK, hardware identifiers, calibration, and connection settings remain
 out of scope for public release.
+
+The processed visual and convex-collision teaware OBJ assets are intentionally
+included under `src/teaware_mujoco/assets/teaware/` with repository-owner
+authorization. Source identifiers and checksums remain in the bundled catalog.

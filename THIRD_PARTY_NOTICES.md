@@ -16,3 +16,11 @@ repository. No separate upstream license file was supplied with these assets.
 
 The xHand SDK, serial numbers, calibration files, and hardware connection
 settings are not included.
+
+## Teaware model assets
+
+`src/teaware_mujoco/assets/teaware/` contains 40 processed teaware visual OBJ
+meshes and their convex collision decompositions used by the source research
+project. The repository owner authorized their inclusion in this public
+repository. Per-asset source identifiers and checksums are retained in
+`catalog.json`.

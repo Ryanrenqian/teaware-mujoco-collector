@@ -43,6 +43,9 @@ teaware_mujoco = [
   "assets/xhand/*.urdf",
   "assets/xhand/meshes/*.STL",
   "assets/xhand/meshes/*.obj",
+  "assets/teaware/*.json",
+  "assets/teaware/*/*.json",
+  "assets/teaware/*/*.obj",
 ]
 
 [tool.pytest.ini_options]

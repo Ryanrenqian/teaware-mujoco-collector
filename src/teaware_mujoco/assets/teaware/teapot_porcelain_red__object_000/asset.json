@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_porcelain_red__object_000",
+  "family": "teapot_porcelain_red",
+  "instance": "object_000",
+  "split": "train",
+  "source": "teapot_porcelain_red/object_000/object_resized.glb",
+  "source_sha256": "d9bc2a079d65e6a15f46976527494d9b8a3418b6368552c123297e36620526f6",
+  "source_manifest_sha256": "4ccf584d777cc31b31294e9fd0ea2b36933d2bee4567baf29e8d569bbcb32e08",
+  "visual": "teapot_porcelain_red__object_000/visual.obj",
+  "collisions": [
+    "teapot_porcelain_red__object_000/collision_00.obj",
+    "teapot_porcelain_red__object_000/collision_01.obj",
+    "teapot_porcelain_red__object_000/collision_02.obj",
+    "teapot_porcelain_red__object_000/collision_03.obj",
+    "teapot_porcelain_red__object_000/collision_04.obj",
+    "teapot_porcelain_red__object_000/collision_05.obj",
+    "teapot_porcelain_red__object_000/collision_06.obj",
+    "teapot_porcelain_red__object_000/collision_07.obj",
+    "teapot_porcelain_red__object_000/collision_08.obj",
+    "teapot_porcelain_red__object_000/collision_09.obj",
+    "teapot_porcelain_red__object_000/collision_10.obj",
+    "teapot_porcelain_red__object_000/collision_11.obj",
+    "teapot_porcelain_red__object_000/collision_12.obj",
+    "teapot_porcelain_red__object_000/collision_13.obj",
+    "teapot_porcelain_red__object_000/collision_14.obj",
+    "teapot_porcelain_red__object_000/collision_15.obj"
+  ],
+  "extents_m": [
+    0.12935237689840523,
+    0.08735711577168467,
+    0.06924904882907867
+  ],
+  "mass_kg": 0.492977459187137,
+  "mesh_volume_m3": 0.0002738763662150761,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}

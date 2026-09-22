@@ -277,7 +277,7 @@ class TeawareCollector:
             for spec, (x, y, yaw) in zip(self.object_specs, placements):
                 joint_id = self._name_id(mujoco.mjtObj.mjOBJ_JOINT, f"{spec['name']}_free")
                 qpos_address = int(self.model.jnt_qposadr[joint_id])
-                position = [x, y, object_spawn_height(spec["preset"], support_z)]
+                position = [x, y, object_spawn_height(spec, support_z)]
                 self.data.qpos[qpos_address : qpos_address + 3] = position
                 self.data.qpos[qpos_address + 3 : qpos_address + 7] = yaw_quaternion(yaw)
                 sampled[spec["name"]] = {"position": position, "yaw_deg": yaw}

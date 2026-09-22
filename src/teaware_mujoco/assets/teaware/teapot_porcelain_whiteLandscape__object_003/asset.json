@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_porcelain_whiteLandscape__object_003",
+  "family": "teapot_porcelain_whiteLandscape",
+  "instance": "object_003",
+  "split": "held_out",
+  "source": "teapot_porcelain_whiteLandscape/object_003/object_resized.glb",
+  "source_sha256": "c8776629a684060fdfc03c5536b4080683ba19e5280215de00be22149397257f",
+  "source_manifest_sha256": "829335df8e2e0c4ab02d53b29bf67bffdfede0afce7f9619c8b8692f5f229361",
+  "visual": "teapot_porcelain_whiteLandscape__object_003/visual.obj",
+  "collisions": [
+    "teapot_porcelain_whiteLandscape__object_003/collision_00.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_01.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_02.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_03.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_04.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_05.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_06.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_07.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_08.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_09.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_10.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_11.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_12.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_13.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_14.obj",
+    "teapot_porcelain_whiteLandscape__object_003/collision_15.obj"
+  ],
+  "extents_m": [
+    0.09155288980696098,
+    0.09155265971897955,
+    0.06570346653461456
+  ],
+  "mass_kg": 0.3469539656651994,
+  "mesh_volume_m3": 0.00019275220314733302,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}

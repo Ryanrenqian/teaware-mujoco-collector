@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "profile_id": "teaware_scaled_max100g_hand_mu1p5_v2",
+  "basis": "Scale catalog masses together so the heaviest included teapot is 100 g; cap all empty props at 100 g.",
+  "mass_scaling": {
+    "scale": 0.1095501188853104,
+    "target_max_mass_kg": 0.1,
+    "max_prop_mass_kg": 0.1
+  },
+  "prop_friction": [0.8, 0.02, 0.001]
+}

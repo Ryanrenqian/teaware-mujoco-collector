@@ -34,7 +34,7 @@ cameras:
   - {name: front_right, position: [1.25, 1.05, 0.92], target: [0.45, 0.0, 0.08], fovy: 52}
   - {name: overhead, position: [0.45, 0.0, 1.55], target: [0.45, 0.0, 0.0], fovy: 48}
 objects:
-  - {name: red_teapot, preset: teapot, rgba: [0.62, 0.11, 0.08, 1.0], randomization: {x: [0.22, 0.48], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
-  - {name: white_teacup, preset: teacup, rgba: [0.88, 0.87, 0.80, 1.0], randomization: {x: [0.46, 0.72], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
-  - {name: celadon_pitcher, preset: pitcher, rgba: [0.36, 0.58, 0.50, 1.0], randomization: {x: [0.28, 0.70], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
-  - {name: tea_canister, preset: canister, rgba: [0.73, 0.58, 0.30, 1.0], randomization: {x: [0.25, 0.70], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
+  - {name: red_teapot, preset: teapot, asset_id: teapot_porcelain_red__object_000, rgba: [0.62, 0.11, 0.08, 1.0], randomization: {x: [0.22, 0.48], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
+  - {name: white_teacup, preset: teacup, asset_id: teapot_porcelain_red__object_001, rgba: [0.88, 0.87, 0.80, 1.0], randomization: {x: [0.46, 0.72], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
+  - {name: celadon_pitcher, preset: pitcher, asset_id: teapot_porcelain_red__object_002, rgba: [0.36, 0.58, 0.50, 1.0], randomization: {x: [0.28, 0.70], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}
+  - {name: tea_canister, preset: canister, asset_id: teapot_porcelain_red__object_003, rgba: [0.73, 0.58, 0.30, 1.0], randomization: {x: [0.25, 0.70], y: [-0.24, 0.24], yaw_deg: [-180, 180]}}

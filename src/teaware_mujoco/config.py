@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from .robots import HAND_TYPES, HANDEDNESS, XHAND_LOWER, XHAND_OPEN_Q, XHAND_UPPER, hand_dof
+from .teaware_assets import get_teaware_asset
 
 
 class ConfigError(ValueError):
@@ -97,6 +98,13 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         object_names.add(name)
         obj["name"] = name
         obj["preset"] = preset
+        asset_id = str(obj.get("asset_id", "")).strip()
+        if asset_id:
+            try:
+                get_teaware_asset(asset_id)
+            except (KeyError, FileNotFoundError) as exc:
+                raise ConfigError(f"{path}.asset_id is invalid: {exc}") from exc
+            obj["asset_id"] = asset_id
         obj["rgba"] = _vec(obj.get("rgba", [0.75, 0.75, 0.72, 1.0]), 4, f"{path}.rgba")
         randomization = _require(obj, "randomization", dict, path)
         randomization["x"] = _vec(randomization.get("x"), 2, f"{path}.randomization.x")

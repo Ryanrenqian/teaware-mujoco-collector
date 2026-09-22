@@ -20,6 +20,25 @@ def test_generated_scene_compiles(tmp_path: Path, tiny_config: dict) -> None:
     assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "white_teacup") >= 0
 
 
+def test_generated_scene_uses_visual_and_convex_collision_teaware_meshes(
+    tmp_path: Path, tiny_config: dict
+) -> None:
+    path = write_scene_xml(tiny_config, tmp_path / "scene.xml")
+    root = ET.parse(path).getroot()
+    meshes = {mesh.attrib["name"]: Path(mesh.attrib["file"]) for mesh in root.findall("./asset/mesh")}
+
+    for spec in tiny_config["objects"]:
+        name = spec["name"]
+        body = root.find(f"./worldbody/body[@name='{name}']")
+        assert body is not None
+        assert body.find("inertial") is not None
+        assert body.find(f"geom[@name='{name}_visual']") is not None
+        assert len(body.findall("geom[@type='mesh'][@group='3']")) == 16
+        assert meshes[f"{name}_visual_mesh"].name == "visual.obj"
+        assert all(path.is_file() for mesh_name, path in meshes.items() if mesh_name.startswith(name))
+        assert body.find(f"geom[@name='{name}_body']") is None
+
+
 def test_dual_xhand_scene_has_namespaced_arms_and_hands(tmp_path: Path) -> None:
     from teaware_mujoco.config import load_config
 

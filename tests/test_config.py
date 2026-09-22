@@ -7,6 +7,7 @@ import yaml
 
 from teaware_mujoco.cli import default_config_path
 from teaware_mujoco.config import ConfigError, config_sha256, load_config
+from teaware_mujoco.teaware_assets import available_asset_ids, get_teaware_asset
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,6 +22,21 @@ def test_default_config_is_valid() -> None:
         "canister",
     }
     assert len(config_sha256(config)) == 64
+    assert [item["asset_id"] for item in config["objects"]] == [
+        "teapot_porcelain_red__object_000",
+        "teapot_porcelain_red__object_001",
+        "teapot_porcelain_red__object_002",
+        "teapot_porcelain_red__object_003",
+    ]
+
+
+def test_teaware_catalog_contains_complete_mesh_assets() -> None:
+    asset_ids = available_asset_ids()
+    assert len(asset_ids) == 40
+    for asset_id in asset_ids:
+        asset = get_teaware_asset(asset_id)
+        assert len(asset["collisions"]) == 16
+        assert len(asset["extents_m"]) == 3
 
 
 def test_duplicate_camera_name_is_rejected(tmp_path: Path) -> None:
@@ -29,6 +45,15 @@ def test_duplicate_camera_name_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "invalid.yaml"
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
     with pytest.raises(ConfigError, match="unique"):
+        load_config(path)
+
+
+def test_unknown_teaware_asset_is_rejected(tmp_path: Path) -> None:
+    config = yaml.safe_load(default_config_path().read_text(encoding="utf-8"))
+    config["objects"][0]["asset_id"] = "missing_asset"
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ConfigError, match="asset_id"):
         load_config(path)
 
 

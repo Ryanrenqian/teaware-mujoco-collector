@@ -48,6 +48,7 @@ cameras:
 objects:
   - name: red_teapot
     preset: teapot
+    asset_id: teapot_porcelain_red__object_000
     rgba: [0.62, 0.11, 0.08, 1.0]
     randomization:
       x: [0.25, 0.48]
@@ -55,6 +56,7 @@ objects:
       yaw_deg: [-180, 180]
   - name: white_teacup
     preset: teacup
+    asset_id: teapot_porcelain_red__object_001
     rgba: [0.88, 0.87, 0.80, 1.0]
     randomization:
       x: [0.42, 0.67]
@@ -62,6 +64,7 @@ objects:
       yaw_deg: [-180, 180]
   - name: celadon_pitcher
     preset: pitcher
+    asset_id: teapot_porcelain_red__object_002
     rgba: [0.36, 0.58, 0.50, 1.0]
     randomization:
       x: [0.28, 0.66]
@@ -69,6 +72,7 @@ objects:
       yaw_deg: [-180, 180]
   - name: tea_canister
     preset: canister
+    asset_id: teapot_porcelain_red__object_003
     rgba: [0.73, 0.58, 0.30, 1.0]
     randomization:
       x: [0.25, 0.66]

@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_porcelain_riceWhiteNBrown__object_000",
+  "family": "teapot_porcelain_riceWhiteNBrown",
+  "instance": "object_000",
+  "split": "train",
+  "source": "teapot_porcelain_riceWhiteNBrown/object_000/object_resized.glb",
+  "source_sha256": "681de82c3028385b2b3295904488bf215961d66530a1b010dd350901e1be09eb",
+  "source_manifest_sha256": "e8b26dba2646f085bae1343a06e741c692e7f83a172c0ed24b3cd2073b8418de",
+  "visual": "teapot_porcelain_riceWhiteNBrown__object_000/visual.obj",
+  "collisions": [
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_00.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_01.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_02.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_03.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_04.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_05.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_06.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_07.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_08.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_09.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_10.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_11.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_12.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_13.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_14.obj",
+    "teapot_porcelain_riceWhiteNBrown__object_000/collision_15.obj"
+  ],
+  "extents_m": [
+    0.1324823747282141,
+    0.09610591217391976,
+    0.06481975317001343
+  ],
+  "mass_kg": 0.5199434740940667,
+  "mesh_volume_m3": 0.00028885748560781487,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}

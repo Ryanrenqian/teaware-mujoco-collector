@@ -1,0 +1,37 @@
+{
+  "asset_id": "teapot_porcelain_red_hy__object_001",
+  "family": "teapot_porcelain_red_hy",
+  "instance": "object_001",
+  "split": "validation",
+  "source": "teapot_porcelain_red_hy/object_001/object_resized.glb",
+  "source_sha256": "e3caed6f60f0b4f1311b81b736cbcb6d4a5ade65ce7e6f05496597c1fe2107c3",
+  "source_manifest_sha256": "6787fd3a7a58a02de9a22b0713f32a1b4c428d27c4d682bd1ef86725eab8365e",
+  "visual": "teapot_porcelain_red_hy__object_001/visual.obj",
+  "collisions": [
+    "teapot_porcelain_red_hy__object_001/collision_00.obj",
+    "teapot_porcelain_red_hy__object_001/collision_01.obj",
+    "teapot_porcelain_red_hy__object_001/collision_02.obj",
+    "teapot_porcelain_red_hy__object_001/collision_03.obj",
+    "teapot_porcelain_red_hy__object_001/collision_04.obj",
+    "teapot_porcelain_red_hy__object_001/collision_05.obj",
+    "teapot_porcelain_red_hy__object_001/collision_06.obj",
+    "teapot_porcelain_red_hy__object_001/collision_07.obj",
+    "teapot_porcelain_red_hy__object_001/collision_08.obj",
+    "teapot_porcelain_red_hy__object_001/collision_09.obj",
+    "teapot_porcelain_red_hy__object_001/collision_10.obj",
+    "teapot_porcelain_red_hy__object_001/collision_11.obj",
+    "teapot_porcelain_red_hy__object_001/collision_12.obj",
+    "teapot_porcelain_red_hy__object_001/collision_13.obj",
+    "teapot_porcelain_red_hy__object_001/collision_14.obj",
+    "teapot_porcelain_red_hy__object_001/collision_15.obj"
+  ],
+  "extents_m": [
+    0.0627987304785535,
+    0.06288316628841295,
+    0.05329516530036926
+  ],
+  "mass_kg": 0.1325908724868415,
+  "mesh_volume_m3": 7.366159582602307e-05,
+  "convex_part_count": 16,
+  "source_license": "unknown_internal_use_only"
+}
