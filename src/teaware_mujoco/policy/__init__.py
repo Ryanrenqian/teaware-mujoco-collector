@@ -4,6 +4,7 @@ from .local import LocalModelPolicy
 from .remote import RemoteVLAPolicy
 from .scripted import ScriptedMotionPolicy
 from .trajectory import TimedTrajectoryPolicy
+from .tro import TROGraspPolicy
 
 __all__ = [
     "ActionChunk",
@@ -13,6 +14,7 @@ __all__ = [
     "PolicyRunner",
     "RemoteVLAPolicy",
     "ScriptedMotionPolicy",
+    "TROGraspPolicy",
     "TimedTrajectoryPolicy",
     "build_policy",
 ]

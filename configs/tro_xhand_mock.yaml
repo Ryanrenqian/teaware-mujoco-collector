@@ -1,0 +1,36 @@
+simulation: {timestep: 0.002, settle_s: 0.5, duration_s: 6.5, capture_fps: 10}
+renderer: {width: 640, height: 480}
+policy:
+  type: tro_grasp
+  task: Pick up the red teapot with the right xHand.
+  robot_id: right_arm
+  target_object: red_teapot
+  control_hz: 20
+  action_horizon: 8
+  tro:
+    backend: centroid_mock
+    hand_type: xhand
+    num_candidates: 1
+    grasp_constraint: {enabled: true, max_distance_m: 0.22}
+scene_profile: single_xhand_tro_mock
+table: {center: [0.42, 0.0, -0.035], size: [1.05, 0.82, 0.06], rgba: [0.42, 0.30, 0.20, 1.0]}
+robots:
+  - id: right_arm
+    hand: xhand
+    handedness: right
+    base_position: [0.0, 0.0, 0.0]
+    base_yaw_deg: 0
+    home_q: [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
+    motion_amplitude: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    hand_home_q: [1.45, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    hand_motion_amplitude: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+randomization: {minimum_object_distance: 0.13, max_placement_attempts: 200}
+cameras:
+  - {name: front_left, position: [1.10, -0.92, 0.82], target: [0.43, 0.0, 0.06], fovy: 48}
+  - {name: front_right, position: [1.05, 0.92, 0.76], target: [0.43, 0.0, 0.06], fovy: 48}
+  - {name: overhead, position: [0.43, 0.0, 1.35], target: [0.43, 0.0, 0.0], fovy: 42}
+objects:
+  - {name: red_teapot, preset: teapot, asset_id: teapot_porcelain_red__object_000, rgba: [0.62, 0.11, 0.08, 1.0], randomization: {x: [0.30, 0.42], y: [-0.14, -0.04], yaw_deg: [-30, 30]}}
+  - {name: white_teacup, preset: teacup, asset_id: teapot_porcelain_red__object_001, rgba: [0.88, 0.87, 0.80, 1.0], randomization: {x: [0.48, 0.62], y: [0.08, 0.20], yaw_deg: [-180, 180]}}
+  - {name: celadon_pitcher, preset: pitcher, asset_id: teapot_porcelain_red__object_002, rgba: [0.36, 0.58, 0.50, 1.0], randomization: {x: [0.50, 0.64], y: [-0.22, -0.12], yaw_deg: [-180, 180]}}
+  - {name: tea_canister, preset: canister, asset_id: teapot_porcelain_red__object_003, rgba: [0.73, 0.58, 0.30, 1.0], randomization: {x: [0.28, 0.40], y: [0.08, 0.20], yaw_deg: [-180, 180]}}

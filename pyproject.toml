@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "teaware-mujoco-collector"
-version = "0.3.0"
+version = "0.4.0"
 description = "Standalone MuJoCo teaware scene generation, multimodal data collection, and web inspection"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,10 @@ dependencies = [
 dev = [
   "pytest>=8",
   "ruff>=0.9",
+]
+tro = [
+  "omegaconf>=2.3",
+  "torch>=2.2",
 ]
 
 [project.scripts]

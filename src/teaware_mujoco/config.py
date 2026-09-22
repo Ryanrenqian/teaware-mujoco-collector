@@ -55,8 +55,8 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(policy, dict):
         raise ConfigError("config.policy must be a mapping")
     policy_type = str(policy.get("type", "scripted_motion")).strip().lower()
-    if policy_type not in {"scripted_motion", "remote_vla"}:
-        raise ConfigError("config.policy.type must be scripted_motion or remote_vla")
+    if policy_type not in {"scripted_motion", "remote_vla", "tro_grasp"}:
+        raise ConfigError("config.policy.type must be scripted_motion, remote_vla, or tro_grasp")
     task = str(policy.get("task", "Move the robot through a staged collection trajectory.")).strip()
     if not task:
         raise ConfigError("config.policy.task must be non-empty")
@@ -81,6 +81,96 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         )
         if policy["timeout_s"] <= 0 or not 1 <= policy["jpeg_quality"] <= 100:
             raise ConfigError("remote_vla timeout_s and jpeg_quality are invalid")
+    elif policy_type == "tro_grasp":
+        policy["robot_id"] = str(policy.get("robot_id", "")).strip()
+        policy["target_object"] = str(policy.get("target_object", "")).strip()
+        if not policy["robot_id"] or not policy["target_object"]:
+            raise ConfigError("tro_grasp requires policy.robot_id and policy.target_object")
+        tro = _require(policy, "tro", dict, "config.policy")
+        backend = str(tro.get("backend", "local")).strip().lower()
+        if backend not in {"local", "http", "centroid_mock"}:
+            raise ConfigError("config.policy.tro.backend must be local, http, or centroid_mock")
+        tro.update(
+            backend=backend,
+            hand_type=str(tro.get("hand_type", "xhand")).strip(),
+            num_candidates=int(tro.get("num_candidates", 8)),
+            object_points=int(tro.get("object_points", 2048)),
+            environment_points=int(tro.get("environment_points", 4096)),
+            root_to_tcp_position=_vec(
+                tro.get("root_to_tcp_position", [0.0, 0.0, -0.065]),
+                3,
+                "policy.tro.root_to_tcp_position",
+            ),
+            root_to_tcp_quaternion_wxyz=_vec(
+                tro.get("root_to_tcp_quaternion_wxyz", [1.0, 0.0, 0.0, 0.0]),
+                4,
+                "policy.tro.root_to_tcp_quaternion_wxyz",
+            ),
+            approach_axis=_vec(
+                tro.get("approach_axis", [0.0, -1.0, 0.0]),
+                3,
+                "policy.tro.approach_axis",
+            ),
+            pregrasp_offset_m=float(tro.get("pregrasp_offset_m", 0.10)),
+            lift_m=float(tro.get("lift_m", 0.12)),
+            fallback_hand_q=_vec(
+                tro.get(
+                    "fallback_hand_q",
+                    [1.35, -0.55, 0.55, 0.0, 1.25, 1.10, 1.25, 1.10, 1.2, 1.05, 1.15, 1.0],
+                ),
+                12,
+                "policy.tro.fallback_hand_q",
+            ),
+        )
+        if min(tro["num_candidates"], tro["object_points"], tro["environment_points"]) <= 0:
+            raise ConfigError("TRO candidate and point counts must be positive")
+        if tro["pregrasp_offset_m"] <= 0 or tro["lift_m"] <= 0:
+            raise ConfigError("TRO pregrasp_offset_m and lift_m must be positive")
+        grasp_constraint = tro.setdefault("grasp_constraint", {})
+        if not isinstance(grasp_constraint, dict):
+            raise ConfigError("config.policy.tro.grasp_constraint must be a mapping")
+        grasp_constraint.update(
+            enabled=bool(grasp_constraint.get("enabled", False)),
+            max_distance_m=float(grasp_constraint.get("max_distance_m", 0.22)),
+        )
+        if grasp_constraint["max_distance_m"] <= 0:
+            raise ConfigError("policy.tro.grasp_constraint.max_distance_m must be positive")
+        durations = tro.setdefault("stage_durations_s", {})
+        if not isinstance(durations, dict):
+            raise ConfigError("config.policy.tro.stage_durations_s must be a mapping")
+        for key, default in {
+            "pregrasp": 1.5,
+            "grasp": 1.0,
+            "close": 0.7,
+            "lift": 1.0,
+            "return": 1.5,
+            "release": 0.5,
+        }.items():
+            durations[key] = float(durations.get(key, default))
+            if durations[key] <= 0:
+                raise ConfigError(f"policy.tro.stage_durations_s.{key} must be positive")
+        if duration_s + 1e-9 < sum(durations.values()):
+            raise ConfigError(
+                "simulation.duration_s must cover the complete TRO grasp stage durations"
+            )
+        if backend == "local":
+            for key in ("root", "config", "checkpoint"):
+                tro[key] = str(tro.get(key, "")).strip()
+                if not tro[key]:
+                    raise ConfigError(f"local TRO requires config.policy.tro.{key}")
+            tro["device"] = str(tro.get("device", "")).strip() or None
+            tro["inference_steps"] = int(tro.get("inference_steps", 20))
+            tro["noise_lambda"] = float(tro.get("noise_lambda", 0.2))
+            tro["root_link_name"] = str(tro.get("root_link_name", "")).strip() or None
+        elif backend == "http":
+            url = str(tro.get("url", "")).strip().rstrip("/")
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ConfigError("HTTP TRO requires config.policy.tro.url")
+            tro["url"] = url
+            tro["timeout_s"] = float(tro.get("timeout_s", 120.0))
+            if tro["timeout_s"] <= 0:
+                raise ConfigError("config.policy.tro.timeout_s must be positive")
 
     renderer = _require(config, "renderer", dict, "config")
     renderer["width"] = int(renderer.get("width", 640))
@@ -226,6 +316,16 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
                     raise ConfigError(
                         f"{path}.hand_home_q[{joint_index}] is outside xHand limits"
                     )
+    if policy_type == "tro_grasp":
+        if policy["robot_id"] not in robot_ids:
+            raise ConfigError(f"tro_grasp robot_id {policy['robot_id']!r} is not configured")
+        selected_robot = next(robot for robot in robots if robot["id"] == policy["robot_id"])
+        if selected_robot["hand"] != "xhand":
+            raise ConfigError("tro_grasp currently requires an xhand robot")
+        if policy["target_object"] not in object_names:
+            raise ConfigError(
+                f"tro_grasp target_object {policy['target_object']!r} is not configured"
+            )
     config["scene_profile"] = str(config.get("scene_profile", "custom"))
     return config
 

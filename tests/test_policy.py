@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from teaware_mujoco.collector import TeawareCollector
+from teaware_mujoco.config import load_config
 from teaware_mujoco.policy import (
     ActionChunk,
     LocalModelPolicy,
@@ -18,7 +19,11 @@ from teaware_mujoco.policy import (
     ScriptedMotionPolicy,
     TimedTrajectoryPolicy,
 )
+from teaware_mujoco.policy.ik import pose_matrix
 from teaware_mujoco.policy.mock_server import create_mock_vla_app
+from teaware_mujoco.policy.tro import _as_pose
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _observation(robot_count: int = 1, *, time_s: float = 0.0) -> PolicyObservation:
@@ -48,6 +53,22 @@ def test_action_chunk_rejects_wrong_or_nonfinite_shapes() -> None:
         ActionChunk(np.zeros((1, 7)), np.zeros((1, 1, 12)), 0.1)
     with pytest.raises(ValueError, match="non-finite"):
         ActionChunk(np.full((1, 1, 7), np.nan), np.zeros((1, 1, 12)), 0.1)
+
+
+def test_pose_matrix_applies_quaternion_rotation() -> None:
+    angle = np.pi / 2.0
+    transform = pose_matrix(
+        np.asarray([1.0, 2.0, 3.0]),
+        np.asarray([np.cos(angle / 2.0), 0.0, 0.0, np.sin(angle / 2.0)]),
+    )
+    np.testing.assert_allclose(transform[:3, 3], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(transform[:3, :3] @ [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], atol=1e-8)
+
+
+def test_tro_http_pose_mapping_is_supported() -> None:
+    transform = _as_pose({"position": [0.1, 0.2, 0.3], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]})
+    np.testing.assert_allclose(transform[:3, :3], np.eye(3))
+    np.testing.assert_allclose(transform[:3, 3], [0.1, 0.2, 0.3])
 
 
 def test_scripted_motion_policy_returns_staged_action_chunk(tiny_config: dict) -> None:
@@ -177,3 +198,28 @@ def test_policy_failure_rolls_back_temporary_episode(tmp_path: Path, tiny_config
 
     assert list((root / "episodes").iterdir()) == []
     assert not (root / "dataset.jsonl").exists()
+
+
+def test_tro_mock_policy_plans_and_lifts_target_object(tmp_path: Path) -> None:
+    config = load_config(REPO_ROOT / "configs" / "tro_xhand_mock.yaml")
+    config["renderer"].update(width=64, height=48)
+    config["cameras"] = config["cameras"][:1]
+    config["simulation"].update(settle_s=0.01, duration_s=1.9, capture_fps=10.0)
+    config["policy"]["tro"]["stage_durations_s"] = {
+        key: 0.3 for key in ("pregrasp", "grasp", "close", "lift", "return", "release")
+    }
+    config["policy"]["tro"]["grasp_constraint"]["max_distance_m"] = 0.30
+    collector = TeawareCollector(config, tmp_path / "tro_dataset")
+    try:
+        episode = collector.collect_episode(7)
+    finally:
+        collector.close()
+
+    manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
+    with np.load(episode / "trajectory.npz", allow_pickle=False) as trajectory:
+        stages = list(dict.fromkeys(trajectory["policy_stage"].tolist()))
+        target_z = trajectory["body_position"][:, 0, 2]
+        assert target_z.max() > target_z[0] + 0.04
+    assert manifest["policy"]["type"] == "tro_grasp"
+    assert manifest["policy"]["tro"]["backend"] == "centroid_mock"
+    assert stages == ["pregrasp", "grasp", "close", "lift", "return", "release"]

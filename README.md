@@ -4,7 +4,7 @@
 
 当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及 10 套、40 件真实茶具模型。每件茶具使用原始视觉 OBJ 和 16 个凸碰撞 OBJ；默认场景加载 `teapot_porcelain_red` 四件套。xHand 使用原项目中的左右手 URDF、视觉/碰撞 mesh、惯量、关节轴和限位，并保持与原控制栈一致的 12 关节顺序；仓库不包含 SDK 或真机配置。
 
-采集执行支持统一 policy 接口：内置 staged 运控 baseline、进程内 VLA/model callable，以及 HTTP VLA server。三种后端都输出带时间间隔的关节位置 `ActionChunk`，共用同一套限位、仿真执行和数据记录逻辑。
+采集执行支持统一 policy 接口：内置 staged 运控 baseline、独立 TRO 抓取、进程内 VLA/model callable，以及 HTTP VLA server。所有后端都输出带时间间隔的关节位置 `ActionChunk`，共用同一套限位、仿真执行和数据记录逻辑。TRO 抓取链只依赖独立 TRO checkout、配置和权重，不 import 或读取 `waic-demo4`。
 
 ## 快速开始
 
@@ -16,8 +16,7 @@ cd teaware-mujoco-collector
 uv sync --extra dev
 
 # 采集 3 个 episode，seed 分别为 100、101、102
-uv run teaware-mj collect \
-  --config configs/tea_table.yaml \
+uv run teaware-mj --config configs/tea_table.yaml collect \
   --output data/teaware \
   --episodes 3 \
   --seed 100
@@ -26,8 +25,7 @@ uv run teaware-mj collect \
 uv run teaware-mj validate --dataset data/teaware
 
 # 启动网页采集台
-uv run teaware-mj serve \
-  --config configs/tea_table.yaml \
+uv run teaware-mj --config configs/tea_table.yaml serve \
   --dataset data/teaware \
   --host 127.0.0.1 \
   --port 8080
@@ -42,6 +40,8 @@ uv run teaware-mj serve \
 | `configs/single_gripper.yaml` | 单 xArm7 + 两指夹爪 |
 | `configs/single_xhand.yaml` | 单 xArm7 + 右 xHand（12 DoF） |
 | `configs/dual_xhand.yaml` | 双 xArm7 + 左/右 xHand（14 + 24 DoF） |
+| `configs/tro_xhand.yaml` | 独立本地 TRO + MuJoCo IK 抓取 |
+| `configs/tro_xhand_mock.yaml` | 不加载模型的 TRO 抓取闭环验收 |
 
 将上面的 `--config` 切换为对应文件即可采集或启动网页。三个配置共享同一数据契约。
 
@@ -64,7 +64,7 @@ src/teaware_mujoco/
   robots.py                            xHand q12 顺序、限位和命名契约
   scene.py                             多臂/手、茶具和相机的 YAML -> MJCF
   collector.py                         仿真推进、多模态渲染、原子写盘
-  policy/                              运控、本地模型和远端 VLA 的统一接口与 runner
+  policy/                              运控、TRO、本地模型和远端 VLA 的统一接口与 runner
   schema.py                            episode 发现与完整性校验
   release_audit.py                     许可证和敏感信息发布门禁
   web.py                               FastAPI 和图像/episode API
@@ -103,9 +103,62 @@ YAML 中的长度均为米、角度为度。主要字段：
 
 默认四件套的 `asset_id` 分别为 `teapot_porcelain_red__object_000` 至 `object_003`，对应茶壶、茶杯、公道杯和茶叶罐。`assets/teaware/catalog.json` 列出全部 40 个可用 id；替换 YAML 中的 id 即可切换茶具，同一对象的 `name` 无需改变，因此 trajectory 和 instance label 契约保持稳定。不写 `asset_id` 时仍可使用旧的参数化 preset。
 
+## TRO 抓取
+
+`tro_grasp` 是独立的仿真抓取链：从当前茶具 mesh 和随机位姿构造目标/环境点云，在机器人 base frame 调用 TRO，依次尝试候选；每个候选用当前 MuJoCo 模型的 Jacobian 做预抓取、最终抓取和抬升 IK。选中候选后生成 `pregrasp → grasp → close → lift → return → release` 的机械臂与 xHand 同步轨迹。
+
+先运行不需要权重的闭环验收：
+
+```bash
+uv run teaware-mj --config configs/tro_xhand_mock.yaml collect \
+  --output data/tro-mock \
+  --episodes 1 \
+  --seed 7
+
+uv run teaware-mj validate --dataset data/tro-mock
+```
+
+正式本地 TRO 需要安装可选依赖，并提供独立 TRO checkout、部署 YAML 和主策略 checkpoint：
+
+```bash
+uv sync --extra dev --extra tro
+
+export TRO_ROOT=/absolute/path/to/tro
+export TRO_CONFIG=/absolute/path/to/infer_xhand.yaml
+export TRO_CHECKPOINT=/absolute/path/to/step_xxx.pth
+
+uv run teaware-mj --config configs/tro_xhand.yaml collect \
+  --output data/tro-xhand \
+  --episodes 10 \
+  --seed 100
+```
+
+TRO checkout 需要包含 `model/vqvae_encoder.py` 以及部署 YAML 所引用的 object/env encoder。`configs/tro_xhand.yaml` 默认使用 `cuda:0`；无 CUDA 时可以将 `device` 改为 `cpu`，但推理速度会明显降低。
+
+本地 loader 直接读取 TRO 的 link-pose 输出。机械臂 IK 和 xHand link retarget 均由当前仓库中的 MuJoCo 模型完成，不依赖 Pyroki、cuRobo、硬件驱动或 `waic-demo4`。当前规划器是仿真用的阻尼最小二乘 IK 和关节空间平滑插值，不等价于 cuRobo 的全局避障规划；不可达候选会被丢弃，并继续尝试下一个 TRO 候选。
+
+也可以把 TRO 单独部署成 HTTP 服务，将 `tro.backend` 改为 `http` 并设置 `tro.url`。客户端调用 `POST /v1/grasp-candidates`，请求中包含 base64 NPY 格式的 `object_points_npy_base64`、`environment_points_npy_base64`、`hand_type` 和 `num_candidates`。响应格式为：
+
+```json
+{
+  "candidates": [
+    {
+      "rank": 0,
+      "root_link_name": "right_hand_link",
+      "root_pose_base": [[1, 0, 0, 0.4], [0, 1, 0, 0], [0, 0, 1, 0.2], [0, 0, 0, 1]],
+      "hand_q": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    }
+  ]
+}
+```
+
+`hand_q` 可以省略：本地 raw TRO backend 会把 `pred_links` 交给 MuJoCo xHand IK；HTTP backend 也可以返回 `finger_q`/`q_pk` 的 joint-name mapping。候选位姿采用机器人 base frame，长度单位为米，旋转矩阵为右手系。
+
+`tro.grasp_constraint.enabled` 控制仿真抓取稳定器。启用后，只有手掌进入 `max_distance_m` 且阶段进入 `close` 才建立当前相对位姿的 MuJoCo weld，`release` 阶段自动解除。该设置会写入 episode policy provenance；要评估纯接触物理时将其设为 `false`。
+
 ## Policy 与 VLA
 
-默认配置使用确定性的 staged joint-space 运控 policy：home、approach、close、lift、return。它负责验证完整 action/采集链，也是后续迁移 `waic-demo4` 抓取规划和 cuRobo 轨迹的接口基线：
+默认配置使用确定性的 staged joint-space 运控 policy：home、approach、close、lift、return。它负责快速验证 action/采集链：
 
 ```yaml
 policy:
@@ -161,7 +214,7 @@ policy = LocalModelPolicy(model.predict, name="my-vla", model_metadata={"checkpo
 collector = TeawareCollector(config, "data/local-vla", policy=policy)
 ```
 
-`waic-demo4` 的 `TimedTrajectory` 可直接包装为相同 policy，不需要引入原项目的网页或硬件 driver：
+外部规划器产生的 timed trajectory 也可以包装为相同 policy；对象只需暴露 `positions`、`times` 或 `cmd_dt`，运行时不需要原规划工程：
 
 ```python
 from teaware_mujoco.policy import TimedTrajectoryPolicy

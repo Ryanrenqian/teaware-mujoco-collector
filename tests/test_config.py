@@ -67,6 +67,27 @@ def test_remote_vla_policy_requires_http_url(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_tro_configs_define_independent_local_and_mock_backends() -> None:
+    local = load_config(REPO_ROOT / "configs" / "tro_xhand.yaml")
+    mock = load_config(REPO_ROOT / "configs" / "tro_xhand_mock.yaml")
+    assert local["policy"]["type"] == "tro_grasp"
+    assert local["policy"]["tro"]["backend"] == "local"
+    assert local["policy"]["tro"]["root"] == "${TRO_ROOT}"
+    assert mock["policy"]["tro"]["backend"] == "centroid_mock"
+    assert mock["policy"]["tro"]["grasp_constraint"]["enabled"] is True
+
+
+def test_tro_grasp_requires_duration_for_all_stages(tmp_path: Path) -> None:
+    config = yaml.safe_load(
+        (REPO_ROOT / "configs" / "tro_xhand_mock.yaml").read_text(encoding="utf-8")
+    )
+    config["simulation"]["duration_s"] = 1.0
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ConfigError, match="complete TRO grasp"):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     ("name", "profile", "hands"),
     [

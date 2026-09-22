@@ -103,7 +103,8 @@ class TeawareCollector:
             dtype=np.int32,
         )
         self.robots = [self._build_robot_runtime(spec) for spec in config["robots"]]
-        self.policy = policy or build_policy(config)
+        self.policy = policy or build_policy(config, model=self.model, robots=self.robots)
+        self._grasp_constraint = self._build_grasp_constraint()
         self._lock = threading.RLock()
         self._current_seed: int | None = None
         self._latest_frames: dict[str, dict[str, np.ndarray]] = {}
@@ -176,6 +177,8 @@ class TeawareCollector:
             "hand_dof": len(hand_joint_names),
             "arm_joint_names": arm_joint_names,
             "hand_joint_names": hand_joint_names,
+            "arm_joint_ids": arm_joint_ids,
+            "hand_joint_ids": hand_joint_ids,
             "arm_qpos_addresses": self.model.jnt_qposadr[arm_joint_ids].astype(np.int32),
             "arm_dof_addresses": self.model.jnt_dofadr[arm_joint_ids].astype(np.int32),
             "hand_qpos_addresses": self.model.jnt_qposadr[hand_joint_ids].astype(np.int32),
@@ -192,6 +195,64 @@ class TeawareCollector:
             "base_position": list(spec["base_position"]),
             "base_yaw_deg": float(spec["base_yaw_deg"]),
         }
+
+    def _build_grasp_constraint(self) -> dict[str, Any] | None:
+        policy = self.config["policy"]
+        if policy["type"] != "tro_grasp":
+            return None
+        constraint = policy["tro"]["grasp_constraint"]
+        if not constraint["enabled"]:
+            return None
+        robot = next(runtime for runtime in self.robots if runtime["id"] == policy["robot_id"])
+        equality_name = f"{robot['id']}_{policy['target_object']}_grasp_weld"
+        equality_id = self._name_id(mujoco.mjtObj.mjOBJ_EQUALITY, equality_name)
+        hand_body_name = f"{robot['id']}_{robot['handedness']}_hand_link"
+        return {
+            "equality_id": equality_id,
+            "hand_body_id": self._name_id(mujoco.mjtObj.mjOBJ_BODY, hand_body_name),
+            "object_body_id": self._name_id(mujoco.mjtObj.mjOBJ_BODY, policy["target_object"]),
+            "max_distance_m": float(constraint["max_distance_m"]),
+        }
+
+    def _update_grasp_constraint(self, stage: str) -> None:
+        constraint = self._grasp_constraint
+        if constraint is None:
+            return
+        equality_id = constraint["equality_id"]
+        if stage == "release":
+            self.data.eq_active[equality_id] = 0
+            return
+        if stage != "close" or self.data.eq_active[equality_id]:
+            return
+        hand_body_id = constraint["hand_body_id"]
+        object_body_id = constraint["object_body_id"]
+        distance = float(
+            np.linalg.norm(self.data.xpos[hand_body_id] - self.data.xpos[object_body_id])
+        )
+        if distance > constraint["max_distance_m"]:
+            return
+        inverse_position = np.empty(3, dtype=np.float64)
+        inverse_quaternion = np.empty(4, dtype=np.float64)
+        relative_position = np.empty(3, dtype=np.float64)
+        relative_quaternion = np.empty(4, dtype=np.float64)
+        mujoco.mju_negPose(
+            inverse_position,
+            inverse_quaternion,
+            self.data.xpos[hand_body_id],
+            self.data.xquat[hand_body_id],
+        )
+        mujoco.mju_mulPose(
+            relative_position,
+            relative_quaternion,
+            inverse_position,
+            inverse_quaternion,
+            self.data.xpos[object_body_id],
+            self.data.xquat[object_body_id],
+        )
+        self.model.eq_data[equality_id, 3:6] = relative_position
+        self.model.eq_data[equality_id, 6:10] = relative_quaternion
+        self.data.eq_active[equality_id] = 1
+        mujoco.mj_forward(self.model, self.data)
 
     def _write_dataset_metadata(self) -> None:
         path = self.dataset_root / "dataset.json"
@@ -520,6 +581,7 @@ class TeawareCollector:
             if frame_index == 0:
                 policy_runner.reset(seed, observation)
             chunk = policy_runner.submit(observation)
+            self._update_grasp_constraint(str(chunk.metadata.get("stage", "")))
             arm_targets, hand_targets = policy_runner.targets_at(float(relative_time))
             self._apply_policy_targets(arm_targets, hand_targets)
             frame_id = f"{frame_index:06d}"

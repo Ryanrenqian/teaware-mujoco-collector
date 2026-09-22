@@ -758,6 +758,22 @@ def build_scene_tree(config: dict[str, Any]) -> ET.ElementTree:
 
     for object_spec in config["objects"]:
         _add_teaware_body(asset, worldbody, object_spec, table_top)
+    if config["policy"]["type"] == "tro_grasp":
+        policy = config["policy"]
+        constraint = policy["tro"]["grasp_constraint"]
+        if constraint["enabled"]:
+            robot = next(spec for spec in config["robots"] if spec["id"] == policy["robot_id"])
+            ET.SubElement(
+                equality,
+                "weld",
+                {
+                    "name": f"{robot['id']}_{policy['target_object']}_grasp_weld",
+                    "body1": f"{robot['id']}_{robot['handedness']}_hand_link",
+                    "body2": policy["target_object"],
+                    "active": "false",
+                    "solref": "0.01 1",
+                },
+            )
     for camera in config["cameras"]:
         ET.SubElement(
             worldbody,
