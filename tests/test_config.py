@@ -8,6 +8,8 @@ import yaml
 from teaware_mujoco.cli import default_config_path
 from teaware_mujoco.config import ConfigError, config_sha256, load_config
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_default_config_is_valid() -> None:
     config = load_config(default_config_path())
@@ -28,3 +30,18 @@ def test_duplicate_camera_name_is_rejected(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
     with pytest.raises(ConfigError, match="unique"):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("name", "profile", "hands"),
+    [
+        ("single_gripper.yaml", "single_gripper", ["gripper"]),
+        ("single_xhand.yaml", "single_xhand", ["xhand"]),
+        ("dual_xhand.yaml", "dual_xhand", ["xhand", "xhand"]),
+    ],
+)
+def test_scenario_configs(name: str, profile: str, hands: list[str]) -> None:
+    config = load_config(REPO_ROOT / "configs" / name)
+    assert config["scene_profile"] == profile
+    assert [robot["hand"] for robot in config["robots"]] == hands
+    assert len({robot["id"] for robot in config["robots"]}) == len(hands)

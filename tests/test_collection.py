@@ -7,6 +7,8 @@ import numpy as np
 
 from teaware_mujoco.schema import discover_episodes, validate_dataset, validate_episode
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_episode_contains_synchronized_modalities(collected_dataset: Path) -> None:
     episodes = discover_episodes(collected_dataset)
@@ -40,3 +42,30 @@ def test_dataset_index_is_committed_after_episode(collected_dataset: Path) -> No
     rows = (collected_dataset / "dataset.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(rows) == 1
     assert json.loads(rows[0])["episode_id"] == "episode_000000"
+
+
+def test_dual_xhand_episode_has_grouped_robot_state(tmp_path: Path) -> None:
+    from teaware_mujoco.collector import TeawareCollector
+    from teaware_mujoco.config import load_config
+
+    config = load_config(REPO_ROOT / "configs/dual_xhand.yaml")
+    config["renderer"].update(width=64, height=48)
+    config["simulation"].update(settle_s=0.01, duration_s=0.05, capture_fps=20.0)
+    config["cameras"] = config["cameras"][:1]
+    config["objects"] = config["objects"][:2]
+    root = tmp_path / "dual_dataset"
+    collector = TeawareCollector(config, root)
+    try:
+        episode = collector.collect_episode(41)
+    finally:
+        collector.close()
+
+    assert validate_episode(episode) == []
+    manifest = json.loads((episode / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["scene_profile"] == "dual_xhand"
+    assert [robot["id"] for robot in manifest["robots"]] == ["left_arm", "right_arm"]
+    trajectory = np.load(episode / "trajectory.npz", allow_pickle=False)
+    assert trajectory["arm_qpos"].shape == (2, 2, 7)
+    assert trajectory["hand_qpos"].shape == (2, 2, 12)
+    assert trajectory["tcp_position"].shape == (2, 2, 3)
+    assert trajectory["robot_ids"].tolist() == ["left_arm", "right_arm"]

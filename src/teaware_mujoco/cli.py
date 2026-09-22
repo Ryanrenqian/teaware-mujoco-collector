@@ -10,6 +10,7 @@ import uvicorn
 
 from .collector import TeawareCollector
 from .config import load_config
+from .release_audit import audit_public_release
 from .scene import write_scene_xml
 from .schema import discover_episodes, validate_dataset
 from .web import create_app
@@ -45,6 +46,10 @@ def _parser() -> argparse.ArgumentParser:
 
     init_config = subparsers.add_parser("init-config", help="Copy the default YAML for editing.")
     init_config.add_argument("destination", type=Path, nargs="?", default=Path("tea_table.yaml"))
+    audit = subparsers.add_parser(
+        "audit-release", help="Check tracked files for licensing and sensitive data issues."
+    )
+    audit.add_argument("--root", type=Path, default=Path.cwd())
     return parser
 
 
@@ -57,6 +62,13 @@ def main(argv: list[str] | None = None) -> int:
             raise FileExistsError(f"refusing to overwrite {destination}")
         shutil.copyfile(default_config_path(), destination)
         print(destination)
+        return 0
+    if args.command == "audit-release":
+        issues = audit_public_release(args.root)
+        if issues:
+            print(json.dumps({"ok": False, "issues": issues}, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps({"ok": True, "issues": []}, ensure_ascii=False, indent=2))
         return 0
 
     config = load_config(args.config)

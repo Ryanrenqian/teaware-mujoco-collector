@@ -2,7 +2,7 @@
 
 一个可独立运行的 MuJoCo 茶具场景数据采集仓库。它将场景定义、随机化、传感器采集、数据契约和网页检查放在同一套小型工具中，不依赖 `waic-demo4` 的 Python 包或运行目录。
 
-当前场景包含 xArm7 + 两指夹爪、茶桌/茶盘，以及参数化茶壶、茶杯、公道杯和茶叶罐。茶具使用 MuJoCo 基础几何体组合，适合验证采集、标定和算法接口；如果研究目标需要照片级外观或精确接触，应在 YAML preset 或 MJCF 生成层替换为经过授权的 mesh。
+当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及参数化茶壶、茶杯、公道杯和茶叶罐。xHand 使用与原控制栈一致的 12 关节顺序和限位，由 MuJoCo 基础几何体程序化生成；仓库不包含来源未确认的厂商 mesh、SDK 或真机配置。
 
 ## 快速开始
 
@@ -33,6 +33,16 @@ uv run teaware-mj serve \
 
 浏览器打开 `http://127.0.0.1:8080`。网页可随机化场景、触发批量采集、选择相机和 RGB/Depth/Segmentation、逐帧浏览历史 episode，并显示数据校验状态。
 
+三套开箱即用的场景配置：
+
+| 配置 | 机器人 |
+|---|---|
+| `configs/single_gripper.yaml` | 单 xArm7 + 两指夹爪 |
+| `configs/single_xhand.yaml` | 单 xArm7 + 右 xHand（12 DoF） |
+| `configs/dual_xhand.yaml` | 双 xArm7 + 左/右 xHand（14 + 24 DoF） |
+
+将上面的 `--config` 切换为对应文件即可采集或启动网页。三个配置共享同一数据契约。
+
 不安装 uv 时也可以使用普通虚拟环境：
 
 ```bash
@@ -47,11 +57,13 @@ Linux 无显示器环境可先设置合适的 MuJoCo 后端，例如 `MUJOCO_GL=
 ## 仓库结构
 
 ```text
-configs/tea_table.yaml                 场景、相机和随机化的可编辑配置
+configs/                               单夹爪、单 xHand、双 xHand 场景配置
 src/teaware_mujoco/
-  scene.py                             YAML -> MJCF，茶具 preset 和相机坐标
+  robots.py                            xHand q12 顺序、限位和命名契约
+  scene.py                             多臂/手、茶具和相机的 YAML -> MJCF
   collector.py                         仿真推进、多模态渲染、原子写盘
   schema.py                            episode 发现与完整性校验
+  release_audit.py                     许可证和敏感信息发布门禁
   web.py                               FastAPI 和图像/episode API
   static/                              无构建步骤的网页前端
   assets/ufactory_xarm7/               vendored xArm7 MJCF、mesh、上游许可证
@@ -75,7 +87,8 @@ YAML 中的长度均为米、角度为度。主要字段：
 - `simulation`: MuJoCo timestep、落稳时间、episode 时长和采样帧率；
 - `renderer`: 所有相机的离屏渲染宽高；
 - `table`: 茶桌中心和完整尺寸；
-- `robot`: 七轴 home joint 和采集期间的小幅正弦运动幅度；
+- `scene_profile`: 数据中记录的场景标识；
+- `robots`: 一台或多台机械臂的 id、手型、左右手、基座位姿、arm/hand home joint 和运动幅度；
 - `cameras`: 固定相机位置、观察目标和垂直视场角；
 - `objects`: 茶具 preset、颜色与平面随机范围；
 - `randomization`: 物体中心最小间距和最大重采样次数。
@@ -114,8 +127,13 @@ data/teaware/
 | `body_position` | `(T,N,3)` | 茶具 world position，米 |
 | `body_quaternion` | `(T,N,4)` | 茶具 world quaternion，wxyz |
 | `body_names` | `(N,)` | 上述物体轴的名称 |
+| `arm_qpos/qvel/ctrl` | `(T,R,7)` | 每台机械臂的七轴状态与控制量 |
+| `hand_qpos/qvel/ctrl` | `(T,R,12)` | 每只手的状态与控制量；超过 `hand_dof` 的位置补零 |
+| `tcp_position` | `(T,R,3)` | 每台机器人 TCP 的 world position |
+| `tcp_quaternion` | `(T,R,4)` | 每台机器人 TCP 的 world quaternion，wxyz |
+| `robot_ids/hand_types/hand_dof` | `(R,)` | 机器人轴的语义和有效手自由度 |
 
-相机 `intrinsics`、`T_world_camera`、`T_camera_world` 和 MuJoCo 相机轴约定记录在每个 manifest。RGB、深度、分割和状态使用相同 `frame_id`；episode 先写入隐藏临时目录，全部完成后再原子改名并追加索引，因此浏览器不会看到半写入记录。
+schema v2 的 `manifest.json` 还保存每台机器人的 id、hand type、handedness、基座位姿和关节名。旧 schema v1 episode 仍可验证。相机 `intrinsics`、`T_world_camera`、`T_camera_world` 和 MuJoCo 相机轴约定记录在每个 manifest。RGB、深度、分割和状态使用相同 `frame_id`；episode 先写入隐藏临时目录，全部完成后再原子改名并追加索引，因此浏览器不会看到半写入记录。
 
 ## 网页/API
 
@@ -138,17 +156,19 @@ FastAPI 的机器可读接口文档在 `/docs`。
 ```bash
 uv run ruff check src tests
 uv run pytest -q
+uv run teaware-mj audit-release --root .
 ```
 
 最小 smoke test 会真正编译 MJCF、创建离屏 renderer、采集 RGB/depth/segmentation，并对落盘数据执行 schema 校验。它不连接任何真实机器人或相机。
 
 ## 当前边界
 
-- 这是场景/传感器数据采集仓库，不包含抓取策略、逆运动学或真机控制。
+- 这是场景/传感器数据采集仓库，不包含抓取策略、逆运动学、厂商 SDK 或真机控制。
+- 程序化 xHand 保留 q12 接口与运动学结构，用于数据管线和算法联调，不宣称复刻厂商 mesh、惯量或接触参数。
 - 茶具是参数化近似几何体；替换 mesh 时应同时核对单位、质心、惯量和碰撞简化。
 - 当前随机化覆盖平面位置和 yaw；材质、光照、相机扰动可以继续在 `scene.py` 和 YAML schema 中扩展。
 - `depth_preview.png` 使用逐帧百分位拉伸，只适合人工查看；算法必须读取 `depth.npy`。
 
 ## 第三方资产
 
-`src/teaware_mujoco/assets/ufactory_xarm7/` 来自 MuJoCo Menagerie 的 UFACTORY xArm7 模型，使用 BSD-3-Clause License；上游 `LICENSE`、`README.md` 和 `CHANGELOG.md` 已原样保留。仓库没有复制 `waic-demo4` 的业务代码或运行数据。
+`src/teaware_mujoco/assets/ufactory_xarm7/` 来自 MuJoCo Menagerie 的 UFACTORY xArm7 模型，使用 BSD-3-Clause License；上游 `LICENSE`、`README.md` 和 `CHANGELOG.md` 已原样保留。完整说明见 `THIRD_PARTY_NOTICES.md` 和 `docs/PUBLIC_RELEASE.md`。仓库没有复制 `waic-demo4` 的厂商 xHand mesh/SDK、业务代码或运行数据。

@@ -41,9 +41,10 @@ function refreshImage() {
 
 async function loadStatus() {
   state.status = await api("/api/status");
-  $("status").textContent = `${state.status.episode_count} episodes / ${state.status.renderer.width}x${state.status.renderer.height}`;
+  $("status").textContent = `${state.status.scene_profile} / ${state.status.episode_count} episodes / ${state.status.renderer.width}x${state.status.renderer.height}`;
   $("camera").innerHTML = state.status.cameras.map((name) => `<option>${name}</option>`).join("");
-  $("scene-strip").textContent = `OBJECTS  ${state.status.objects.join("  /  ")}   DATASET  ${state.status.dataset_root}`;
+  const robots = state.status.robots.map((robot) => `${robot.id}:${robot.handedness}-${robot.hand}[${robot.hand_dof}]`).join("  /  ");
+  $("scene-strip").textContent = `ROBOTS  ${robots}   OBJECTS  ${state.status.objects.join("  /  ")}   DATASET  ${state.status.dataset_root}`;
   if (state.status.current_seed === null) {
     await api("/api/randomize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seed: 0 }) });
   }
@@ -73,6 +74,8 @@ async function selectEpisode(id) {
     created_at: detail.manifest.created_at,
     seed: detail.manifest.seed,
     cameras: Object.keys(detail.manifest.cameras),
+    scene_profile: detail.manifest.scene_profile,
+    robots: detail.manifest.robots,
     objects: detail.manifest.objects,
     validation_errors: detail.validation_errors,
     config_sha256: detail.manifest.config_sha256,

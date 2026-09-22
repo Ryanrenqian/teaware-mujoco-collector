@@ -14,9 +14,18 @@ table:
   size: [1.05, 0.82, 0.06]
   rgba: [0.42, 0.30, 0.20, 1.0]
 
-robot:
-  home_q: [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
-  motion_amplitude: [0.04, 0.025, 0.04, 0.03, 0.03, 0.03, 0.04]
+scene_profile: single_gripper
+
+robots:
+  - id: arm
+    hand: gripper
+    handedness: right
+    base_position: [0.0, 0.0, 0.0]
+    base_yaw_deg: 0
+    home_q: [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
+    motion_amplitude: [0.04, 0.025, 0.04, 0.03, 0.03, 0.03, 0.04]
+    hand_home_q: [0.0]
+    hand_motion_amplitude: [0.0]
 
 randomization:
   minimum_object_distance: 0.13

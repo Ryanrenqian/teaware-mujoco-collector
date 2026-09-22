@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .robots import HAND_TYPES, HANDEDNESS, XHAND_LOWER, XHAND_OPEN_Q, XHAND_UPPER, hand_dof
+
 
 class ConfigError(ValueError):
     pass
@@ -118,11 +120,73 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if randomization["minimum_object_distance"] < 0:
         raise ConfigError("randomization.minimum_object_distance must be non-negative")
 
-    robot = config.setdefault("robot", {})
-    home = robot.get("home_q", [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0])
-    amplitude = robot.get("motion_amplitude", [0.05, 0.04, 0.05, 0.04, 0.04, 0.04, 0.05])
-    robot["home_q"] = _vec(home, 7, "robot.home_q")
-    robot["motion_amplitude"] = _vec(amplitude, 7, "robot.motion_amplitude")
+    legacy_robot = config.pop("robot", None)
+    robots = config.get("robots")
+    if robots is None:
+        legacy_robot = legacy_robot or {}
+        robots = [
+            {
+                "id": "arm",
+                "hand": "gripper",
+                "handedness": "right",
+                "base_position": [0.0, 0.0, 0.0],
+                "base_yaw_deg": 0.0,
+                **legacy_robot,
+            }
+        ]
+        config["robots"] = robots
+    if not isinstance(robots, list) or not robots:
+        raise ConfigError("config.robots must be a non-empty list")
+
+    robot_ids: set[str] = set()
+    default_home = [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
+    default_amplitude = [0.05, 0.04, 0.05, 0.04, 0.04, 0.04, 0.05]
+    for index, robot in enumerate(robots):
+        path = f"robots[{index}]"
+        if not isinstance(robot, dict):
+            raise ConfigError(f"{path} must be a mapping")
+        robot_id = str(robot.get("id", "")).strip()
+        if not robot_id or not robot_id.replace("_", "").isalnum():
+            raise ConfigError(f"{path}.id must contain only letters, numbers, and underscores")
+        if robot_id in robot_ids:
+            raise ConfigError(f"{path}.id must be unique")
+        robot_ids.add(robot_id)
+        hand = str(robot.get("hand", "gripper")).strip().lower()
+        handedness = str(robot.get("handedness", "right")).strip().lower()
+        if hand not in HAND_TYPES:
+            raise ConfigError(f"{path}.hand must be one of {sorted(HAND_TYPES)}")
+        if handedness not in HANDEDNESS:
+            raise ConfigError(f"{path}.handedness must be one of {sorted(HANDEDNESS)}")
+        robot["id"] = robot_id
+        robot["hand"] = hand
+        robot["handedness"] = handedness
+        robot["base_position"] = _vec(
+            robot.get("base_position", [0.0, 0.0, 0.0]), 3, f"{path}.base_position"
+        )
+        robot["base_yaw_deg"] = float(robot.get("base_yaw_deg", 0.0))
+        robot["home_q"] = _vec(robot.get("home_q", default_home), 7, f"{path}.home_q")
+        robot["motion_amplitude"] = _vec(
+            robot.get("motion_amplitude", default_amplitude),
+            7,
+            f"{path}.motion_amplitude",
+        )
+        dof = hand_dof(hand)
+        default_hand_home = list(XHAND_OPEN_Q) if hand == "xhand" else [0.0]
+        robot["hand_home_q"] = _vec(
+            robot.get("hand_home_q", default_hand_home), dof, f"{path}.hand_home_q"
+        )
+        robot["hand_motion_amplitude"] = _vec(
+            robot.get("hand_motion_amplitude", [0.0] * dof),
+            dof,
+            f"{path}.hand_motion_amplitude",
+        )
+        if hand == "xhand":
+            for joint_index, value in enumerate(robot["hand_home_q"]):
+                if not XHAND_LOWER[joint_index] <= value <= XHAND_UPPER[joint_index]:
+                    raise ConfigError(
+                        f"{path}.hand_home_q[{joint_index}] is outside xHand limits"
+                    )
+    config["scene_profile"] = str(config.get("scene_profile", "custom"))
     return config
 
 

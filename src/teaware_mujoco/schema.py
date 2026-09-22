@@ -6,7 +6,8 @@ from typing import Any
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = {1, SCHEMA_VERSION}
 
 
 def load_manifest(episode_dir: str | Path) -> dict[str, Any]:
@@ -43,9 +44,11 @@ def validate_episode(episode_dir: str | Path) -> list[str]:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return [f"manifest.json: {exc}"]
 
-    if manifest.get("schema_version") != SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         errors.append(
-            f"schema_version must be {SCHEMA_VERSION}, got {manifest.get('schema_version')!r}"
+            f"schema_version must be one of {sorted(SUPPORTED_SCHEMA_VERSIONS)}, "
+            f"got {schema_version!r}"
         )
     frames = manifest.get("frames")
     cameras = manifest.get("cameras")
@@ -103,6 +106,33 @@ def validate_episode(episode_dir: str | Path) -> list[str]:
                     errors.append(
                         f"trajectory.{key}: expected {frame_count} rows, got {len(trajectory[key])}"
                     )
+            if schema_version == SCHEMA_VERSION:
+                robots = manifest.get("robots")
+                if not isinstance(robots, list) or not robots:
+                    errors.append("manifest.robots must be a non-empty list for schema v2")
+                else:
+                    robot_count = len(robots)
+                    expected_shapes = {
+                        "arm_qpos": (frame_count, robot_count, 7),
+                        "arm_qvel": (frame_count, robot_count, 7),
+                        "arm_ctrl": (frame_count, robot_count, 7),
+                        "hand_qpos": (frame_count, robot_count, 12),
+                        "hand_qvel": (frame_count, robot_count, 12),
+                        "hand_ctrl": (frame_count, robot_count, 12),
+                        "tcp_position": (frame_count, robot_count, 3),
+                        "tcp_quaternion": (frame_count, robot_count, 4),
+                        "robot_ids": (robot_count,),
+                        "hand_types": (robot_count,),
+                        "hand_dof": (robot_count,),
+                    }
+                    for key, expected_shape in expected_shapes.items():
+                        if key not in trajectory:
+                            errors.append(f"trajectory.npz missing {key}")
+                        elif trajectory[key].shape != expected_shape:
+                            errors.append(
+                                f"trajectory.{key}: expected shape {expected_shape}, "
+                                f"got {trajectory[key].shape}"
+                            )
         except (OSError, ValueError) as exc:
             errors.append(f"cannot load trajectory.npz: {exc}")
     return errors

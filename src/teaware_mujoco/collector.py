@@ -16,6 +16,13 @@ from PIL import Image
 
 from . import __version__
 from .config import config_sha256, public_config
+from .robots import (
+    ARM_ACTUATOR_SUFFIXES,
+    ARM_JOINT_SUFFIXES,
+    MAX_HAND_DOF,
+    xhand_actuator_names,
+    xhand_joint_names,
+)
 from .scene import object_spawn_height, table_top_z, write_scene_xml, yaw_quaternion
 from .schema import SCHEMA_VERSION
 
@@ -89,10 +96,7 @@ class TeawareCollector:
             [self._name_id(mujoco.mjtObj.mjOBJ_BODY, name) for name in self.object_names],
             dtype=np.int32,
         )
-        self.arm_actuator_ids = np.asarray(
-            [self._name_id(mujoco.mjtObj.mjOBJ_ACTUATOR, f"act{index}") for index in range(1, 8)],
-            dtype=np.int32,
-        )
+        self.robots = [self._build_robot_runtime(spec) for spec in config["robots"]]
         self._lock = threading.RLock()
         self._current_seed: int | None = None
         self._latest_frames: dict[str, dict[str, np.ndarray]] = {}
@@ -106,6 +110,16 @@ class TeawareCollector:
             "dataset_root": str(self.dataset_root),
             "cameras": list(self.camera_names),
             "objects": list(self.object_names),
+            "scene_profile": self.config["scene_profile"],
+            "robots": [
+                {
+                    "id": robot["id"],
+                    "hand": robot["hand"],
+                    "handedness": robot["handedness"],
+                    "hand_dof": robot["hand_dof"],
+                }
+                for robot in self.robots
+            ],
             "renderer": {"width": self.width, "height": self.height},
             "current_seed": self._current_seed,
         }
@@ -115,6 +129,58 @@ class TeawareCollector:
         if value < 0:
             raise ValueError(f"MuJoCo object not found: {name}")
         return int(value)
+
+    def _build_robot_runtime(self, spec: dict[str, Any]) -> dict[str, Any]:
+        robot_id = spec["id"]
+        arm_joint_names = [f"{robot_id}_{suffix}" for suffix in ARM_JOINT_SUFFIXES]
+        arm_actuator_names = [f"{robot_id}_{suffix}" for suffix in ARM_ACTUATOR_SUFFIXES]
+        arm_joint_ids = np.asarray(
+            [self._name_id(mujoco.mjtObj.mjOBJ_JOINT, name) for name in arm_joint_names],
+            dtype=np.int32,
+        )
+        if spec["hand"] == "xhand":
+            hand_joint_names = xhand_joint_names(robot_id, spec["handedness"])
+            hand_actuator_names = xhand_actuator_names(robot_id)
+            tcp_site_name = f"{robot_id}_hand_tcp"
+        else:
+            hand_joint_names = [f"{robot_id}_left_driver_joint"]
+            hand_actuator_names = [f"{robot_id}_gripper"]
+            tcp_site_name = f"{robot_id}_link_tcp"
+        hand_joint_ids = np.asarray(
+            [self._name_id(mujoco.mjtObj.mjOBJ_JOINT, name) for name in hand_joint_names],
+            dtype=np.int32,
+        )
+        arm_actuator_ids = np.asarray(
+            [self._name_id(mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in arm_actuator_names],
+            dtype=np.int32,
+        )
+        hand_actuator_ids = np.asarray(
+            [self._name_id(mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in hand_actuator_names],
+            dtype=np.int32,
+        )
+        return {
+            "id": robot_id,
+            "hand": spec["hand"],
+            "handedness": spec["handedness"],
+            "hand_dof": len(hand_joint_names),
+            "arm_joint_names": arm_joint_names,
+            "hand_joint_names": hand_joint_names,
+            "arm_qpos_addresses": self.model.jnt_qposadr[arm_joint_ids].astype(np.int32),
+            "arm_dof_addresses": self.model.jnt_dofadr[arm_joint_ids].astype(np.int32),
+            "hand_qpos_addresses": self.model.jnt_qposadr[hand_joint_ids].astype(np.int32),
+            "hand_dof_addresses": self.model.jnt_dofadr[hand_joint_ids].astype(np.int32),
+            "arm_actuator_ids": arm_actuator_ids,
+            "hand_actuator_ids": hand_actuator_ids,
+            "tcp_site_id": self._name_id(mujoco.mjtObj.mjOBJ_SITE, tcp_site_name),
+            "home_q": np.asarray(spec["home_q"], dtype=np.float64),
+            "motion_amplitude": np.asarray(spec["motion_amplitude"], dtype=np.float64),
+            "hand_home_q": np.asarray(spec["hand_home_q"], dtype=np.float64),
+            "hand_motion_amplitude": np.asarray(
+                spec["hand_motion_amplitude"], dtype=np.float64
+            ),
+            "base_position": list(spec["base_position"]),
+            "base_yaw_deg": float(spec["base_yaw_deg"]),
+        }
 
     def _write_dataset_metadata(self) -> None:
         path = self.dataset_root / "dataset.json"
@@ -140,10 +206,44 @@ class TeawareCollector:
 
     def _reset(self) -> None:
         mujoco.mj_resetData(self.model, self.data)
-        if self.model.nkey:
-            mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
-        home = np.asarray(self.config["robot"]["home_q"], dtype=np.float64)
-        self.data.ctrl[self.arm_actuator_ids] = home
+        for robot in self.robots:
+            self.data.qpos[robot["arm_qpos_addresses"]] = robot["home_q"]
+            self.data.ctrl[robot["arm_actuator_ids"]] = robot["home_q"]
+            self.data.qpos[robot["hand_qpos_addresses"]] = robot["hand_home_q"]
+            self.data.ctrl[robot["hand_actuator_ids"]] = robot["hand_home_q"]
+        mujoco.mj_forward(self.model, self.data)
+
+    def _robot_state(self) -> tuple[np.ndarray, ...]:
+        robot_count = len(self.robots)
+        arm_qpos = np.zeros((robot_count, 7), dtype=np.float64)
+        arm_qvel = np.zeros((robot_count, 7), dtype=np.float64)
+        arm_ctrl = np.zeros((robot_count, 7), dtype=np.float64)
+        hand_qpos = np.zeros((robot_count, MAX_HAND_DOF), dtype=np.float64)
+        hand_qvel = np.zeros((robot_count, MAX_HAND_DOF), dtype=np.float64)
+        hand_ctrl = np.zeros((robot_count, MAX_HAND_DOF), dtype=np.float64)
+        tcp_position = np.zeros((robot_count, 3), dtype=np.float64)
+        tcp_quaternion = np.zeros((robot_count, 4), dtype=np.float64)
+        for index, robot in enumerate(self.robots):
+            hand_dof = robot["hand_dof"]
+            arm_qpos[index] = self.data.qpos[robot["arm_qpos_addresses"]]
+            arm_qvel[index] = self.data.qvel[robot["arm_dof_addresses"]]
+            arm_ctrl[index] = self.data.ctrl[robot["arm_actuator_ids"]]
+            hand_qpos[index, :hand_dof] = self.data.qpos[robot["hand_qpos_addresses"]]
+            hand_qvel[index, :hand_dof] = self.data.qvel[robot["hand_dof_addresses"]]
+            hand_ctrl[index, :hand_dof] = self.data.ctrl[robot["hand_actuator_ids"]]
+            site_id = robot["tcp_site_id"]
+            tcp_position[index] = self.data.site_xpos[site_id]
+            mujoco.mju_mat2Quat(tcp_quaternion[index], self.data.site_xmat[site_id])
+        return (
+            arm_qpos,
+            arm_qvel,
+            arm_ctrl,
+            hand_qpos,
+            hand_qvel,
+            hand_ctrl,
+            tcp_position,
+            tcp_quaternion,
+        )
 
     def _sample_placements(self, rng: np.random.Generator) -> list[tuple[float, float, float]]:
         minimum_distance = float(self.config["randomization"]["minimum_object_distance"])
@@ -311,10 +411,12 @@ class TeawareCollector:
         frame_times = np.arange(0.0, duration + 0.5 / capture_fps, 1.0 / capture_fps)
         start_time = float(self.data.time)
         rng = np.random.default_rng(seed + 1)
-        phases = rng.uniform(0.0, 2.0 * np.pi, size=7)
-        frequencies = rng.uniform(0.08, 0.18, size=7)
-        home = np.asarray(self.config["robot"]["home_q"], dtype=np.float64)
-        amplitude = np.asarray(self.config["robot"]["motion_amplitude"], dtype=np.float64)
+        phases = rng.uniform(0.0, 2.0 * np.pi, size=(len(self.robots), 7))
+        frequencies = rng.uniform(0.08, 0.18, size=(len(self.robots), 7))
+        hand_phases = rng.uniform(0.0, 2.0 * np.pi, size=(len(self.robots), MAX_HAND_DOF))
+        hand_frequencies = rng.uniform(
+            0.05, 0.12, size=(len(self.robots), MAX_HAND_DOF)
+        )
 
         time_rows: list[float] = []
         qpos_rows: list[np.ndarray] = []
@@ -322,14 +424,39 @@ class TeawareCollector:
         ctrl_rows: list[np.ndarray] = []
         body_pos_rows: list[np.ndarray] = []
         body_quat_rows: list[np.ndarray] = []
+        arm_qpos_rows: list[np.ndarray] = []
+        arm_qvel_rows: list[np.ndarray] = []
+        arm_ctrl_rows: list[np.ndarray] = []
+        hand_qpos_rows: list[np.ndarray] = []
+        hand_qvel_rows: list[np.ndarray] = []
+        hand_ctrl_rows: list[np.ndarray] = []
+        tcp_position_rows: list[np.ndarray] = []
+        tcp_quaternion_rows: list[np.ndarray] = []
         frame_records: list[dict[str, Any]] = []
 
         for frame_index, relative_time in enumerate(frame_times):
             target_time = start_time + float(relative_time)
             while self.data.time + self.model.opt.timestep * 0.5 < target_time:
                 elapsed = float(self.data.time - start_time)
-                target = home + amplitude * np.sin(2.0 * np.pi * frequencies * elapsed + phases)
-                self.data.ctrl[self.arm_actuator_ids] = target
+                for robot_index, robot in enumerate(self.robots):
+                    target = robot["home_q"] + robot["motion_amplitude"] * np.sin(
+                        2.0 * np.pi * frequencies[robot_index] * elapsed
+                        + phases[robot_index]
+                    )
+                    self.data.ctrl[robot["arm_actuator_ids"]] = target
+                    hand_dof = robot["hand_dof"]
+                    hand_target = robot["hand_home_q"] + robot["hand_motion_amplitude"] * np.sin(
+                        2.0
+                        * np.pi
+                        * hand_frequencies[robot_index, :hand_dof]
+                        * elapsed
+                        + hand_phases[robot_index, :hand_dof]
+                    )
+                    actuator_ids = robot["hand_actuator_ids"]
+                    limits = self.model.actuator_ctrlrange[actuator_ids]
+                    self.data.ctrl[actuator_ids] = np.clip(
+                        hand_target, limits[:, 0], limits[:, 1]
+                    )
                 mujoco.mj_step(self.model, self.data)
 
             modalities = self._render_all()
@@ -367,6 +494,15 @@ class TeawareCollector:
             ctrl_rows.append(self.data.ctrl.copy())
             body_pos_rows.append(self.data.xpos[self.object_body_ids].copy())
             body_quat_rows.append(self.data.xquat[self.object_body_ids].copy())
+            robot_state = self._robot_state()
+            arm_qpos_rows.append(robot_state[0])
+            arm_qvel_rows.append(robot_state[1])
+            arm_ctrl_rows.append(robot_state[2])
+            hand_qpos_rows.append(robot_state[3])
+            hand_qvel_rows.append(robot_state[4])
+            hand_ctrl_rows.append(robot_state[5])
+            tcp_position_rows.append(robot_state[6])
+            tcp_quaternion_rows.append(robot_state[7])
             frame_records.append({"frame_id": frame_id, "time_s": time_rows[-1]})
 
         trajectory_path = tmp_dir / "trajectory.npz"
@@ -379,6 +515,17 @@ class TeawareCollector:
             body_position=np.asarray(body_pos_rows, dtype=np.float64),
             body_quaternion=np.asarray(body_quat_rows, dtype=np.float64),
             body_names=np.asarray(self.object_names),
+            arm_qpos=np.asarray(arm_qpos_rows, dtype=np.float64),
+            arm_qvel=np.asarray(arm_qvel_rows, dtype=np.float64),
+            arm_ctrl=np.asarray(arm_ctrl_rows, dtype=np.float64),
+            hand_qpos=np.asarray(hand_qpos_rows, dtype=np.float64),
+            hand_qvel=np.asarray(hand_qvel_rows, dtype=np.float64),
+            hand_ctrl=np.asarray(hand_ctrl_rows, dtype=np.float64),
+            tcp_position=np.asarray(tcp_position_rows, dtype=np.float64),
+            tcp_quaternion=np.asarray(tcp_quaternion_rows, dtype=np.float64),
+            robot_ids=np.asarray([robot["id"] for robot in self.robots]),
+            hand_types=np.asarray([robot["hand"] for robot in self.robots]),
+            hand_dof=np.asarray([robot["hand_dof"] for robot in self.robots], dtype=np.int32),
         )
         manifest = {
             "schema_version": SCHEMA_VERSION,
@@ -393,6 +540,20 @@ class TeawareCollector:
             "renderer": {"width": self.width, "height": self.height},
             "cameras": self._camera_metadata(),
             "objects": self.object_names,
+            "scene_profile": self.config["scene_profile"],
+            "robots": [
+                {
+                    "id": robot["id"],
+                    "hand_type": robot["hand"],
+                    "handedness": robot["handedness"],
+                    "base_position": robot["base_position"],
+                    "base_yaw_deg": robot["base_yaw_deg"],
+                    "arm_joint_names": robot["arm_joint_names"],
+                    "hand_joint_names": robot["hand_joint_names"],
+                    "hand_dof": robot["hand_dof"],
+                }
+                for robot in self.robots
+            ],
             "segmentation": {
                 "raw_array": "*_segmentation.npy",
                 "raw_array_channels": ["object_id", "object_type"],
@@ -413,6 +574,17 @@ class TeawareCollector:
                     "body_position": "(T, object, 3) world metres",
                     "body_quaternion": "(T, object, 4) world wxyz",
                     "body_names": "(object,)",
+                    "arm_qpos": "(T, robot, 7)",
+                    "arm_qvel": "(T, robot, 7)",
+                    "arm_ctrl": "(T, robot, 7)",
+                    "hand_qpos": "(T, robot, 12), zero-padded after hand_dof",
+                    "hand_qvel": "(T, robot, 12), zero-padded after hand_dof",
+                    "hand_ctrl": "(T, robot, 12), zero-padded after hand_dof",
+                    "tcp_position": "(T, robot, 3) world metres",
+                    "tcp_quaternion": "(T, robot, 4) world wxyz",
+                    "robot_ids": "(robot,)",
+                    "hand_types": "(robot,)",
+                    "hand_dof": "(robot,)",
                 },
             },
         }

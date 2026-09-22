@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .collector import TeawareCollector, _segmentation_preview
 from .schema import discover_episodes, load_manifest, validate_episode
 
@@ -109,7 +110,7 @@ def create_app(config: dict[str, Any], dataset_root: str | Path) -> FastAPI:
         finally:
             worker.close()
 
-    app = FastAPI(title="Teaware MuJoCo Collector", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Teaware MuJoCo Collector", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
     def simulation() -> SimulationWorker:

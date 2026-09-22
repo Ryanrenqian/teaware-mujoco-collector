@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import xml.etree.ElementTree as ET
 from importlib.resources import files
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from .robots import XHAND_JOINT_SUFFIXES, XHAND_LOWER, XHAND_UPPER
 
 
 def _numbers(values: list[float] | np.ndarray) -> str:
@@ -170,9 +173,287 @@ def xarm_asset_dir() -> Path:
     return Path(str(files("teaware_mujoco").joinpath("assets", "ufactory_xarm7")))
 
 
+_REFERENCE_ATTRIBUTES = {
+    "body1",
+    "body2",
+    "childclass",
+    "class",
+    "joint",
+    "joint1",
+    "joint2",
+    "material",
+    "mesh",
+    "site",
+    "tendon",
+}
+
+
+def _strip_template_gripper(template: ET.Element) -> None:
+    worldbody = template.find("worldbody")
+    if worldbody is not None:
+        for parent in worldbody.iter("body"):
+            for child in list(parent):
+                if child.tag == "body" and child.get("name") == "xarm_gripper_base_link":
+                    parent.remove(child)
+    for section_name in ("contact", "tendon", "equality"):
+        section = template.find(section_name)
+        if section is not None:
+            section.clear()
+    actuator = template.find("actuator")
+    if actuator is not None:
+        for child in list(actuator):
+            if child.get("name") == "gripper":
+                actuator.remove(child)
+
+
+def _namespace_template(template: ET.Element, prefix: str) -> None:
+    for mesh in template.findall("./asset/mesh"):
+        if "name" not in mesh.attrib:
+            mesh.set("name", Path(mesh.attrib["file"]).stem)
+        mesh.set("file", str((xarm_asset_dir() / mesh.attrib["file"]).resolve()))
+    for element in template.iter():
+        if "name" in element.attrib:
+            element.set("name", prefix + element.attrib["name"])
+        for attribute in _REFERENCE_ATTRIBUTES:
+            if attribute in element.attrib:
+                element.set(attribute, prefix + element.attrib[attribute])
+
+
+def _joint(
+    body: ET.Element,
+    *,
+    name: str,
+    axis: list[float],
+    lower: float,
+    upper: float,
+) -> None:
+    ET.SubElement(
+        body,
+        "joint",
+        {
+            "name": name,
+            "type": "hinge",
+            "axis": _numbers(axis),
+            "range": _numbers([lower, upper]),
+            "damping": "0.12",
+            "armature": "0.002",
+        },
+    )
+
+
+def _finger_segment(
+    parent: ET.Element,
+    *,
+    name: str,
+    joint_name: str,
+    position: list[float],
+    length: float,
+    lower: float,
+    upper: float,
+    rgba: list[float],
+    axis: list[float] | None = None,
+) -> ET.Element:
+    body = ET.SubElement(parent, "body", {"name": name, "pos": _numbers(position)})
+    _joint(
+        body,
+        name=joint_name,
+        axis=axis or [1.0, 0.0, 0.0],
+        lower=lower,
+        upper=upper,
+    )
+    _geom(
+        body,
+        name=f"{name}_geom",
+        type="capsule",
+        fromto=[0.0, 0.0, 0.0, 0.0, 0.0, length],
+        size=[0.009],
+        rgba=rgba,
+        density=550,
+        friction=[0.9, 0.02, 0.001],
+    )
+    return body
+
+
+def _add_xhand(
+    link7: ET.Element,
+    actuator: ET.Element,
+    robot_id: str,
+    handedness: str,
+) -> None:
+    prefix = f"{robot_id}_{handedness}_hand_"
+    mirror = -1.0 if handedness == "left" else 1.0
+    rgba = [0.15, 0.19, 0.22, 1.0] if handedness == "left" else [0.18, 0.22, 0.26, 1.0]
+    palm = ET.SubElement(
+        link7,
+        "body",
+        {"name": f"{prefix}link", "pos": "0 0 0.045"},
+    )
+    _geom(
+        palm,
+        name=f"{prefix}palm_geom",
+        type="box",
+        pos=[0.0, 0.0, 0.025],
+        size=[0.044, 0.035, 0.025],
+        rgba=rgba,
+        density=650,
+        friction=[0.9, 0.02, 0.001],
+    )
+
+    names = [f"{prefix}{suffix}" for suffix in XHAND_JOINT_SUFFIXES]
+    thumb0 = _finger_segment(
+        palm,
+        name=f"{prefix}thumb_bend_link",
+        joint_name=names[0],
+        position=[mirror * 0.043, -0.012, 0.015],
+        length=0.034,
+        lower=XHAND_LOWER[0],
+        upper=XHAND_UPPER[0],
+        rgba=rgba,
+        axis=[0.0, mirror, 0.0],
+    )
+    thumb1 = _finger_segment(
+        thumb0,
+        name=f"{prefix}thumb_rota_link1",
+        joint_name=names[1],
+        position=[0.0, 0.0, 0.034],
+        length=0.04,
+        lower=XHAND_LOWER[1],
+        upper=XHAND_UPPER[1],
+        rgba=rgba,
+        axis=[1.0, 0.0, 0.0],
+    )
+    _finger_segment(
+        thumb1,
+        name=f"{prefix}thumb_rota_link2",
+        joint_name=names[2],
+        position=[0.0, 0.0, 0.04],
+        length=0.034,
+        lower=XHAND_LOWER[2],
+        upper=XHAND_UPPER[2],
+        rgba=rgba,
+    )
+
+    finger_specs = (
+        ("index", mirror * 0.029, 0.062, 3, True),
+        ("mid", mirror * 0.010, 0.066, 6, False),
+        ("ring", mirror * -0.010, 0.064, 8, False),
+        ("pinky", mirror * -0.029, 0.056, 10, False),
+    )
+    for finger, x_position, first_length, start, has_abduction in finger_specs:
+        parent = palm
+        if has_abduction:
+            parent = _finger_segment(
+                parent,
+                name=f"{prefix}{finger}_bend_link",
+                joint_name=names[start],
+                position=[x_position, 0.0, 0.047],
+                length=0.012,
+                lower=XHAND_LOWER[start],
+                upper=XHAND_UPPER[start],
+                rgba=rgba,
+                axis=[0.0, 1.0, 0.0],
+            )
+            start += 1
+            position = [0.0, 0.0, 0.012]
+        else:
+            position = [x_position, 0.0, 0.047]
+        proximal = _finger_segment(
+            parent,
+            name=f"{prefix}{finger}_link1",
+            joint_name=names[start],
+            position=position,
+            length=first_length,
+            lower=XHAND_LOWER[start],
+            upper=XHAND_UPPER[start],
+            rgba=rgba,
+        )
+        _finger_segment(
+            proximal,
+            name=f"{prefix}{finger}_link2",
+            joint_name=names[start + 1],
+            position=[0.0, 0.0, first_length],
+            length=0.042,
+            lower=XHAND_LOWER[start + 1],
+            upper=XHAND_UPPER[start + 1],
+            rgba=rgba,
+        )
+
+    ET.SubElement(
+        palm,
+        "site",
+        {"name": f"{robot_id}_hand_tcp", "pos": "0 0 0.16", "size": "0.004"},
+    )
+    for index, (joint_name, lower, upper) in enumerate(
+        zip(names, XHAND_LOWER, XHAND_UPPER), start=1
+    ):
+        ET.SubElement(
+            actuator,
+            "position",
+            {
+                "name": f"{robot_id}_xhand_act{index:02d}",
+                "joint": joint_name,
+                "kp": "18",
+                "ctrlrange": _numbers([lower, upper]),
+                "forcerange": "-3 3",
+            },
+        )
+
+
+def _append_robot(
+    *,
+    spec: dict[str, Any],
+    asset: ET.Element,
+    defaults: ET.Element,
+    worldbody: ET.Element,
+    contact: ET.Element,
+    tendon: ET.Element,
+    equality: ET.Element,
+    actuator: ET.Element,
+) -> None:
+    template = ET.parse(xarm_asset_dir() / "xarm7.xml").getroot()
+    if spec["hand"] == "xhand":
+        _strip_template_gripper(template)
+    prefix = f"{spec['id']}_"
+    _namespace_template(template, prefix)
+
+    template_asset = template.find("asset")
+    template_defaults = template.find("default")
+    template_worldbody = template.find("worldbody")
+    assert template_asset is not None
+    assert template_defaults is not None
+    assert template_worldbody is not None
+    for child in template_asset:
+        asset.append(copy.deepcopy(child))
+    for child in template_defaults:
+        defaults.append(copy.deepcopy(child))
+
+    base = copy.deepcopy(next(iter(template_worldbody)))
+    template_position = np.fromstring(base.get("pos", "0 0 0"), sep=" ")
+    position = template_position + np.asarray(spec["base_position"], dtype=np.float64)
+    base.set("pos", _numbers(position))
+    half_yaw = math.radians(float(spec["base_yaw_deg"])) / 2.0
+    base.set("quat", _numbers([math.cos(half_yaw), 0.0, 0.0, math.sin(half_yaw)]))
+    if spec["hand"] == "xhand":
+        link7 = next(body for body in base.iter("body") if body.get("name") == f"{prefix}link7")
+        _add_xhand(link7, actuator, spec["id"], spec["handedness"])
+    worldbody.append(base)
+
+    for section_name, destination in (
+        ("contact", contact),
+        ("tendon", tendon),
+        ("equality", equality),
+        ("actuator", actuator),
+    ):
+        source = template.find(section_name)
+        if source is None:
+            continue
+        for child in source:
+            destination.append(copy.deepcopy(child))
+
+
 def build_scene_tree(config: dict[str, Any]) -> ET.ElementTree:
     root = ET.Element("mujoco", {"model": "teaware_collection_scene"})
-    ET.SubElement(root, "include", {"file": str((xarm_asset_dir() / "xarm7.xml").resolve())})
+    ET.SubElement(root, "compiler", {"angle": "radian", "autolimits": "true"})
     ET.SubElement(
         root,
         "option",
@@ -239,6 +520,8 @@ def build_scene_tree(config: dict[str, Any]) -> ET.ElementTree:
         },
     )
 
+    defaults = ET.SubElement(root, "default")
+
     worldbody = ET.SubElement(root, "worldbody")
     ET.SubElement(
         worldbody,
@@ -295,6 +578,22 @@ def build_scene_tree(config: dict[str, Any]) -> ET.ElementTree:
         rgba=[0.16, 0.19, 0.18, 1],
         friction=[0.9, 0.02, 0.001],
     )
+
+    contact = ET.SubElement(root, "contact")
+    tendon = ET.SubElement(root, "tendon")
+    equality = ET.SubElement(root, "equality")
+    actuator = ET.SubElement(root, "actuator")
+    for robot_spec in config["robots"]:
+        _append_robot(
+            spec=robot_spec,
+            asset=asset,
+            defaults=defaults,
+            worldbody=worldbody,
+            contact=contact,
+            tendon=tendon,
+            equality=equality,
+            actuator=actuator,
+        )
 
     for object_spec in config["objects"]:
         _add_teaware_body(worldbody, object_spec, table_top)
