@@ -4,6 +4,7 @@ simulation:
   duration_s: 1.0
   capture_fps: 10
 renderer: {width: 640, height: 480}
+policy: {type: scripted_motion, task: "Move through approach, close, lift, and return stages around the tea set.", control_hz: 10, action_horizon: 4}
 scene_profile: single_xhand
 table:
   center: [0.42, 0.0, -0.035]

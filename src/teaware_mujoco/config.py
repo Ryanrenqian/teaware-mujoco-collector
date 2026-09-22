@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -49,6 +50,37 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         capture_fps=capture_fps,
         settle_s=settle_s,
     )
+
+    policy = config.setdefault("policy", {})
+    if not isinstance(policy, dict):
+        raise ConfigError("config.policy must be a mapping")
+    policy_type = str(policy.get("type", "scripted_motion")).strip().lower()
+    if policy_type not in {"scripted_motion", "remote_vla"}:
+        raise ConfigError("config.policy.type must be scripted_motion or remote_vla")
+    task = str(policy.get("task", "Move the robot through a staged collection trajectory.")).strip()
+    if not task:
+        raise ConfigError("config.policy.task must be non-empty")
+    policy.update(
+        type=policy_type,
+        task=task,
+        control_hz=float(policy.get("control_hz", capture_fps)),
+        action_horizon=int(policy.get("action_horizon", 4)),
+    )
+    if policy["control_hz"] <= 0 or policy["action_horizon"] <= 0:
+        raise ConfigError("config.policy control_hz and action_horizon must be positive")
+    if policy_type == "remote_vla":
+        url = str(policy.get("url", "")).strip().rstrip("/")
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ConfigError("config.policy.url must be an http(s) URL for remote_vla")
+        policy.update(
+            url=url,
+            timeout_s=float(policy.get("timeout_s", 30.0)),
+            include_depth=bool(policy.get("include_depth", False)),
+            jpeg_quality=int(policy.get("jpeg_quality", 90)),
+        )
+        if policy["timeout_s"] <= 0 or not 1 <= policy["jpeg_quality"] <= 100:
+            raise ConfigError("remote_vla timeout_s and jpeg_quality are invalid")
 
     renderer = _require(config, "renderer", dict, "config")
     renderer["width"] = int(renderer.get("width", 640))

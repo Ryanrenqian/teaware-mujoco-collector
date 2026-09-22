@@ -14,6 +14,7 @@ def test_web_lists_and_renders_episode(collected_dataset: Path, tiny_config: dic
         status = client.get("/api/status").json()
         assert status["episode_count"] == 1
         assert status["cameras"] == ["front_left"]
+        assert status["policy"]["type"] == "scripted_motion"
 
         episodes = client.get("/api/episodes").json()
         assert episodes[0]["episode_id"] == "episode_000000"

@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "teaware-mujoco-collector"
-version = "0.2.0"
+version = "0.3.0"
 description = "Standalone MuJoCo teaware scene generation, multimodal data collection, and web inspection"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
+  "httpx>=0.27",
   "mujoco>=3.3",
   "numpy>=1.26",
   "pillow>=10",
@@ -19,7 +20,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.27",
   "pytest>=8",
   "ruff>=0.9",
 ]

@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = {1, SCHEMA_VERSION}
+SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, SCHEMA_VERSION}
 
 
 def load_manifest(episode_dir: str | Path) -> dict[str, Any]:
@@ -106,7 +106,7 @@ def validate_episode(episode_dir: str | Path) -> list[str]:
                     errors.append(
                         f"trajectory.{key}: expected {frame_count} rows, got {len(trajectory[key])}"
                     )
-            if schema_version == SCHEMA_VERSION:
+            if isinstance(schema_version, int) and schema_version >= 2:
                 robots = manifest.get("robots")
                 if not isinstance(robots, list) or not robots:
                     errors.append("manifest.robots must be a non-empty list for schema v2")
@@ -133,6 +133,25 @@ def validate_episode(episode_dir: str | Path) -> list[str]:
                                 f"trajectory.{key}: expected shape {expected_shape}, "
                                 f"got {trajectory[key].shape}"
                             )
+                    if schema_version >= 3:
+                        if not isinstance(manifest.get("policy"), dict):
+                            errors.append("manifest.policy must be a mapping for schema v3")
+                        policy_shapes = {
+                            "policy_arm_q_target": (frame_count, robot_count, 7),
+                            "policy_hand_q_target": (frame_count, robot_count, 12),
+                            "policy_latency_ms": (frame_count,),
+                            "policy_action_horizon": (frame_count,),
+                            "policy_action_mode": (frame_count,),
+                            "policy_stage": (frame_count,),
+                        }
+                        for key, expected_shape in policy_shapes.items():
+                            if key not in trajectory:
+                                errors.append(f"trajectory.npz missing {key}")
+                            elif trajectory[key].shape != expected_shape:
+                                errors.append(
+                                    f"trajectory.{key}: expected shape {expected_shape}, "
+                                    f"got {trajectory[key].shape}"
+                                )
         except (OSError, ValueError) as exc:
             errors.append(f"cannot load trajectory.npz: {exc}")
     return errors

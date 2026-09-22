@@ -16,6 +16,7 @@ from PIL import Image
 
 from . import __version__
 from .config import config_sha256, public_config
+from .policy import Policy, PolicyObservation, PolicyRunner, build_policy
 from .robots import (
     ARM_ACTUATOR_SUFFIXES,
     ARM_JOINT_SUFFIXES,
@@ -76,7 +77,12 @@ def _segmentation_preview(labels: np.ndarray) -> np.ndarray:
 class TeawareCollector:
     """Stateful MuJoCo scene and atomic episode writer."""
 
-    def __init__(self, config: dict[str, Any], dataset_root: str | Path):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        dataset_root: str | Path,
+        policy: Policy | None = None,
+    ):
         self.config = config
         self.dataset_root = Path(dataset_root).expanduser().resolve()
         self.episodes_root = self.dataset_root / "episodes"
@@ -97,13 +103,17 @@ class TeawareCollector:
             dtype=np.int32,
         )
         self.robots = [self._build_robot_runtime(spec) for spec in config["robots"]]
+        self.policy = policy or build_policy(config)
         self._lock = threading.RLock()
         self._current_seed: int | None = None
         self._latest_frames: dict[str, dict[str, np.ndarray]] = {}
         self._write_dataset_metadata()
 
     def close(self) -> None:
-        self.renderer.close()
+        try:
+            self.policy.close()
+        finally:
+            self.renderer.close()
 
     def status(self) -> dict[str, Any]:
         return {
@@ -121,6 +131,7 @@ class TeawareCollector:
                 for robot in self.robots
             ],
             "renderer": {"width": self.width, "height": self.height},
+            "policy": self.policy.metadata(),
             "current_seed": self._current_seed,
         }
 
@@ -191,6 +202,7 @@ class TeawareCollector:
             "mujoco_version": mujoco.__version__,
             "config_sha256": config_sha256(self.config),
             "config": public_config(self.config),
+            "policy": self.policy.metadata(),
         }
         if path.exists():
             with path.open("r", encoding="utf-8") as handle:
@@ -198,6 +210,10 @@ class TeawareCollector:
             if existing.get("config_sha256") != payload["config_sha256"]:
                 raise ValueError(
                     f"dataset {self.dataset_root} was created with a different configuration"
+                )
+            if existing.get("policy") != payload["policy"]:
+                raise ValueError(
+                    f"dataset {self.dataset_root} was created with a different policy"
                 )
             return
         with path.open("x", encoding="utf-8") as handle:
@@ -244,6 +260,55 @@ class TeawareCollector:
             tcp_position,
             tcp_quaternion,
         )
+
+    def _policy_observation(
+        self,
+        *,
+        episode_id: str,
+        step_index: int,
+        time_s: float,
+        modalities: dict[str, dict[str, np.ndarray]],
+        robot_state: tuple[np.ndarray, ...],
+    ) -> PolicyObservation:
+        return PolicyObservation(
+            episode_id=episode_id,
+            step_index=int(step_index),
+            time_s=float(time_s),
+            task=self.config["policy"]["task"],
+            robot_ids=tuple(robot["id"] for robot in self.robots),
+            hand_dof=np.asarray([robot["hand_dof"] for robot in self.robots], dtype=np.int32),
+            arm_qpos=robot_state[0].copy(),
+            arm_qvel=robot_state[1].copy(),
+            hand_qpos=robot_state[3].copy(),
+            hand_qvel=robot_state[4].copy(),
+            tcp_position=robot_state[6].copy(),
+            tcp_quaternion=robot_state[7].copy(),
+            object_names=tuple(self.object_names),
+            object_position=self.data.xpos[self.object_body_ids].copy(),
+            object_quaternion=self.data.xquat[self.object_body_ids].copy(),
+            images_rgb={name: images["rgb"].copy() for name, images in modalities.items()},
+            images_depth={name: images["depth"].copy() for name, images in modalities.items()},
+        )
+
+    def _apply_policy_targets(
+        self,
+        arm_targets: np.ndarray,
+        hand_targets: np.ndarray,
+    ) -> None:
+        for index, robot in enumerate(self.robots):
+            arm_ids = robot["arm_actuator_ids"]
+            arm_limits = self.model.actuator_ctrlrange[arm_ids]
+            self.data.ctrl[arm_ids] = np.clip(
+                arm_targets[index], arm_limits[:, 0], arm_limits[:, 1]
+            )
+            hand_ids = robot["hand_actuator_ids"]
+            hand_limits = self.model.actuator_ctrlrange[hand_ids]
+            hand_dof = robot["hand_dof"]
+            self.data.ctrl[hand_ids] = np.clip(
+                hand_targets[index, :hand_dof],
+                hand_limits[:, 0],
+                hand_limits[:, 1],
+            )
 
     def _sample_placements(self, rng: np.random.Generator) -> list[tuple[float, float, float]]:
         minimum_distance = float(self.config["randomization"]["minimum_object_distance"])
@@ -410,13 +475,7 @@ class TeawareCollector:
         capture_fps = float(simulation["capture_fps"])
         frame_times = np.arange(0.0, duration + 0.5 / capture_fps, 1.0 / capture_fps)
         start_time = float(self.data.time)
-        rng = np.random.default_rng(seed + 1)
-        phases = rng.uniform(0.0, 2.0 * np.pi, size=(len(self.robots), 7))
-        frequencies = rng.uniform(0.08, 0.18, size=(len(self.robots), 7))
-        hand_phases = rng.uniform(0.0, 2.0 * np.pi, size=(len(self.robots), MAX_HAND_DOF))
-        hand_frequencies = rng.uniform(
-            0.05, 0.12, size=(len(self.robots), MAX_HAND_DOF)
-        )
+        policy_runner = PolicyRunner(self.policy, len(self.robots))
 
         time_rows: list[float] = []
         qpos_rows: list[np.ndarray] = []
@@ -432,35 +491,37 @@ class TeawareCollector:
         hand_ctrl_rows: list[np.ndarray] = []
         tcp_position_rows: list[np.ndarray] = []
         tcp_quaternion_rows: list[np.ndarray] = []
+        policy_arm_target_rows: list[np.ndarray] = []
+        policy_hand_target_rows: list[np.ndarray] = []
+        policy_latency_rows: list[float] = []
+        policy_horizon_rows: list[int] = []
+        policy_mode_rows: list[str] = []
+        policy_stage_rows: list[str] = []
         frame_records: list[dict[str, Any]] = []
 
         for frame_index, relative_time in enumerate(frame_times):
             target_time = start_time + float(relative_time)
             while self.data.time + self.model.opt.timestep * 0.5 < target_time:
                 elapsed = float(self.data.time - start_time)
-                for robot_index, robot in enumerate(self.robots):
-                    target = robot["home_q"] + robot["motion_amplitude"] * np.sin(
-                        2.0 * np.pi * frequencies[robot_index] * elapsed
-                        + phases[robot_index]
-                    )
-                    self.data.ctrl[robot["arm_actuator_ids"]] = target
-                    hand_dof = robot["hand_dof"]
-                    hand_target = robot["hand_home_q"] + robot["hand_motion_amplitude"] * np.sin(
-                        2.0
-                        * np.pi
-                        * hand_frequencies[robot_index, :hand_dof]
-                        * elapsed
-                        + hand_phases[robot_index, :hand_dof]
-                    )
-                    actuator_ids = robot["hand_actuator_ids"]
-                    limits = self.model.actuator_ctrlrange[actuator_ids]
-                    self.data.ctrl[actuator_ids] = np.clip(
-                        hand_target, limits[:, 0], limits[:, 1]
-                    )
+                arm_targets, hand_targets = policy_runner.targets_at(elapsed)
+                self._apply_policy_targets(arm_targets, hand_targets)
                 mujoco.mj_step(self.model, self.data)
 
             modalities = self._render_all()
             self._latest_frames = modalities
+            observation_state = self._robot_state()
+            observation = self._policy_observation(
+                episode_id=episode_id,
+                step_index=frame_index,
+                time_s=float(relative_time),
+                modalities=modalities,
+                robot_state=observation_state,
+            )
+            if frame_index == 0:
+                policy_runner.reset(seed, observation)
+            chunk = policy_runner.submit(observation)
+            arm_targets, hand_targets = policy_runner.targets_at(float(relative_time))
+            self._apply_policy_targets(arm_targets, hand_targets)
             frame_id = f"{frame_index:06d}"
             frame_dir = frame_root / frame_id
             frame_dir.mkdir()
@@ -503,7 +564,20 @@ class TeawareCollector:
             hand_ctrl_rows.append(robot_state[5])
             tcp_position_rows.append(robot_state[6])
             tcp_quaternion_rows.append(robot_state[7])
-            frame_records.append({"frame_id": frame_id, "time_s": time_rows[-1]})
+            policy_arm_target_rows.append(arm_targets.copy())
+            policy_hand_target_rows.append(hand_targets.copy())
+            policy_latency_rows.append(policy_runner.last_latency_ms)
+            policy_horizon_rows.append(chunk.horizon)
+            policy_mode_rows.append(chunk.action_mode)
+            policy_stage_rows.append(str(chunk.metadata.get("stage", "")))
+            frame_records.append(
+                {
+                    "frame_id": frame_id,
+                    "time_s": time_rows[-1],
+                    "policy_latency_ms": policy_latency_rows[-1],
+                    "policy_action_horizon": chunk.horizon,
+                }
+            )
 
         trajectory_path = tmp_dir / "trajectory.npz"
         np.savez_compressed(
@@ -523,6 +597,12 @@ class TeawareCollector:
             hand_ctrl=np.asarray(hand_ctrl_rows, dtype=np.float64),
             tcp_position=np.asarray(tcp_position_rows, dtype=np.float64),
             tcp_quaternion=np.asarray(tcp_quaternion_rows, dtype=np.float64),
+            policy_arm_q_target=np.asarray(policy_arm_target_rows, dtype=np.float64),
+            policy_hand_q_target=np.asarray(policy_hand_target_rows, dtype=np.float64),
+            policy_latency_ms=np.asarray(policy_latency_rows, dtype=np.float64),
+            policy_action_horizon=np.asarray(policy_horizon_rows, dtype=np.int32),
+            policy_action_mode=np.asarray(policy_mode_rows),
+            policy_stage=np.asarray(policy_stage_rows),
             robot_ids=np.asarray([robot["id"] for robot in self.robots]),
             hand_types=np.asarray([robot["hand"] for robot in self.robots]),
             hand_dof=np.asarray([robot["hand_dof"] for robot in self.robots], dtype=np.int32),
@@ -541,6 +621,10 @@ class TeawareCollector:
             "cameras": self._camera_metadata(),
             "objects": self.object_names,
             "scene_profile": self.config["scene_profile"],
+            "policy": {
+                **self.policy.metadata(),
+                "task": self.config["policy"]["task"],
+            },
             "robots": [
                 {
                     "id": robot["id"],
@@ -582,6 +666,12 @@ class TeawareCollector:
                     "hand_ctrl": "(T, robot, 12), zero-padded after hand_dof",
                     "tcp_position": "(T, robot, 3) world metres",
                     "tcp_quaternion": "(T, robot, 4) world wxyz",
+                    "policy_arm_q_target": "(T, robot, 7)",
+                    "policy_hand_q_target": "(T, robot, 12)",
+                    "policy_latency_ms": "(T,)",
+                    "policy_action_horizon": "(T,)",
+                    "policy_action_mode": "(T,)",
+                    "policy_stage": "(T,)",
                     "robot_ids": "(robot,)",
                     "hand_types": "(robot,)",
                     "hand_dof": "(robot,)",

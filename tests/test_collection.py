@@ -36,6 +36,9 @@ def test_episode_contains_synchronized_modalities(collected_dataset: Path) -> No
     assert instance.dtype == np.int32
     assert len(trajectory["time"]) == len(manifest["frames"])
     assert trajectory["body_position"].shape == (2, 2, 3)
+    assert trajectory["policy_arm_q_target"].shape == (2, 1, 7)
+    assert trajectory["policy_hand_q_target"].shape == (2, 1, 12)
+    assert manifest["policy"]["type"] == "scripted_motion"
 
 
 def test_dataset_index_is_committed_after_episode(collected_dataset: Path) -> None:
@@ -68,4 +71,6 @@ def test_dual_xhand_episode_has_grouped_robot_state(tmp_path: Path) -> None:
     assert trajectory["arm_qpos"].shape == (2, 2, 7)
     assert trajectory["hand_qpos"].shape == (2, 2, 12)
     assert trajectory["tcp_position"].shape == (2, 2, 3)
+    assert trajectory["policy_arm_q_target"].shape == (2, 2, 7)
+    assert trajectory["policy_hand_q_target"].shape == (2, 2, 12)
     assert trajectory["robot_ids"].tolist() == ["left_arm", "right_arm"]

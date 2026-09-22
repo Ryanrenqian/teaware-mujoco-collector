@@ -22,6 +22,7 @@ def test_default_config_is_valid() -> None:
         "canister",
     }
     assert len(config_sha256(config)) == 64
+    assert config["policy"]["type"] == "scripted_motion"
     assert [item["asset_id"] for item in config["objects"]] == [
         "teapot_porcelain_red__object_000",
         "teapot_porcelain_red__object_001",
@@ -57,6 +58,15 @@ def test_unknown_teaware_asset_is_rejected(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_remote_vla_policy_requires_http_url(tmp_path: Path) -> None:
+    config = yaml.safe_load(default_config_path().read_text(encoding="utf-8"))
+    config["policy"] = {"type": "remote_vla", "url": "not-a-url"}
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ConfigError, match="http"):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     ("name", "profile", "hands"),
     [
@@ -70,3 +80,4 @@ def test_scenario_configs(name: str, profile: str, hands: list[str]) -> None:
     assert config["scene_profile"] == profile
     assert [robot["hand"] for robot in config["robots"]] == hands
     assert len({robot["id"] for robot in config["robots"]}) == len(hands)
+    assert "return stages" in config["policy"]["task"]

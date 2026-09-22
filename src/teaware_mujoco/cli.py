@@ -10,6 +10,7 @@ import uvicorn
 
 from .collector import TeawareCollector
 from .config import load_config
+from .policy.mock_server import create_mock_vla_app
 from .release_audit import audit_public_release
 from .scene import write_scene_xml
 from .schema import discover_episodes, validate_dataset
@@ -37,6 +38,14 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--dataset", type=Path, default=Path("data/teaware"))
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
+
+    serve_policy = subparsers.add_parser(
+        "serve-policy", help="Run a hold-position mock VLA server for integration testing."
+    )
+    serve_policy.add_argument("--host", default="127.0.0.1")
+    serve_policy.add_argument("--port", type=int, default=8090)
+    serve_policy.add_argument("--action-horizon", type=int, default=4)
+    serve_policy.add_argument("--dt", type=float, default=0.1)
 
     validate = subparsers.add_parser("validate", help="Validate every dataset episode.")
     validate.add_argument("--dataset", type=Path, default=Path("data/teaware"))
@@ -69,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"ok": False, "issues": issues}, ensure_ascii=False, indent=2))
             return 1
         print(json.dumps({"ok": True, "issues": []}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "serve-policy":
+        app = create_mock_vla_app(action_horizon=args.action_horizon, dt_s=args.dt)
+        uvicorn.run(app, host=args.host, port=args.port)
         return 0
 
     config = load_config(args.config)

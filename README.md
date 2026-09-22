@@ -4,6 +4,8 @@
 
 当前支持单臂两指夹爪、单臂 xHand 和双臂 xHand 三种场景，以及 10 套、40 件真实茶具模型。每件茶具使用原始视觉 OBJ 和 16 个凸碰撞 OBJ；默认场景加载 `teapot_porcelain_red` 四件套。xHand 使用原项目中的左右手 URDF、视觉/碰撞 mesh、惯量、关节轴和限位，并保持与原控制栈一致的 12 关节顺序；仓库不包含 SDK 或真机配置。
 
+采集执行支持统一 policy 接口：内置 staged 运控 baseline、进程内 VLA/model callable，以及 HTTP VLA server。三种后端都输出带时间间隔的关节位置 `ActionChunk`，共用同一套限位、仿真执行和数据记录逻辑。
+
 ## 快速开始
 
 要求 Python 3.11+。推荐使用 [uv](https://docs.astral.sh/uv/)：
@@ -62,6 +64,7 @@ src/teaware_mujoco/
   robots.py                            xHand q12 顺序、限位和命名契约
   scene.py                             多臂/手、茶具和相机的 YAML -> MJCF
   collector.py                         仿真推进、多模态渲染、原子写盘
+  policy/                              运控、本地模型和远端 VLA 的统一接口与 runner
   schema.py                            episode 发现与完整性校验
   release_audit.py                     许可证和敏感信息发布门禁
   web.py                               FastAPI 和图像/episode API
@@ -88,6 +91,7 @@ YAML 中的长度均为米、角度为度。主要字段：
 
 - `simulation`: MuJoCo timestep、落稳时间、episode 时长和采样帧率；
 - `renderer`: 所有相机的离屏渲染宽高；
+- `policy`: policy 类型、任务文本、控制频率和 action horizon；
 - `table`: 茶桌中心和完整尺寸；
 - `scene_profile`: 数据中记录的场景标识；
 - `robots`: 一台或多台机械臂的 id、手型、左右手、基座位姿、arm/hand home joint 和运动幅度；
@@ -98,6 +102,80 @@ YAML 中的长度均为米、角度为度。主要字段：
 配置在启动时严格校验。向已有 dataset 写入时，配置哈希必须与 `dataset.json` 一致，避免把不同相机、分辨率或物理参数的数据静默混在一起。需要换配置时应使用新的 dataset 目录。
 
 默认四件套的 `asset_id` 分别为 `teapot_porcelain_red__object_000` 至 `object_003`，对应茶壶、茶杯、公道杯和茶叶罐。`assets/teaware/catalog.json` 列出全部 40 个可用 id；替换 YAML 中的 id 即可切换茶具，同一对象的 `name` 无需改变，因此 trajectory 和 instance label 契约保持稳定。不写 `asset_id` 时仍可使用旧的参数化 preset。
+
+## Policy 与 VLA
+
+默认配置使用确定性的 staged joint-space 运控 policy：home、approach、close、lift、return。它负责验证完整 action/采集链，也是后续迁移 `waic-demo4` 抓取规划和 cuRobo 轨迹的接口基线：
+
+```yaml
+policy:
+  type: scripted_motion
+  task: Move through approach, close, lift, and return stages around the tea set.
+  control_hz: 10
+  action_horizon: 4
+```
+
+远端 VLA 使用同一配置位置：
+
+```yaml
+policy:
+  type: remote_vla
+  task: Pick up the red teapot and pour into the fairness pitcher.
+  url: http://127.0.0.1:8090
+  timeout_s: 30
+  include_depth: false
+  jpeg_quality: 90
+  control_hz: 10
+  action_horizon: 4
+```
+
+仓库提供 hold-position mock server，用来先验证 HTTP 和采集闭环：
+
+```bash
+uv run teaware-mj serve-policy --host 127.0.0.1 --port 8090
+```
+
+VLA server 实现 `POST /v1/actions`。请求包含任务文本、多相机 JPEG、机器人状态、TCP 位姿和茶具状态；响应为：
+
+```json
+{
+  "action": {
+    "arm_q_target": [[[0, 0, 0, 0, 0, 0, 0]]],
+    "hand_q_target": [[[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]],
+    "dt_s": 0.1,
+    "action_mode": "joint_position"
+  },
+  "model": {"name": "model-name", "checkpoint": "model-version"}
+}
+```
+
+数组 shape 分别是 `(H,R,7)` 和 `(H,R,12)`。`H` 是 action horizon，`R` 是机器人数量；二指夹爪只使用 hand 数组的第一个位置。当前只接受 joint-position action，所有输出都经过有限值、shape、机器人数量和 actuator limit 校验。
+
+进程内模型通过 `LocalModelPolicy` 注入，无需启动 HTTP server：
+
+```python
+from teaware_mujoco.collector import TeawareCollector
+from teaware_mujoco.policy import LocalModelPolicy
+
+policy = LocalModelPolicy(model.predict, name="my-vla", model_metadata={"checkpoint": "v1"})
+collector = TeawareCollector(config, "data/local-vla", policy=policy)
+```
+
+`waic-demo4` 的 `TimedTrajectory` 可直接包装为相同 policy，不需要引入原项目的网页或硬件 driver：
+
+```python
+from teaware_mujoco.policy import TimedTrajectoryPolicy
+
+policy = TimedTrajectoryPolicy.from_waic_timed_trajectory(
+    timed_trajectory,
+    hand_positions=xhand_q12_trajectory,
+    control_hz=10,
+    action_horizon=4,
+    provenance={"planner": "curobo"},
+)
+```
+
+每个观测帧采用 receding-horizon 方式请求新的 chunk。VLA 调用失败会使临时 episode 回滚，不会回退到 scripted policy，从而避免不同来源动作混入同一条轨迹。
 
 ## 数据契约
 
@@ -136,8 +214,13 @@ data/teaware/
 | `tcp_position` | `(T,R,3)` | 每台机器人 TCP 的 world position |
 | `tcp_quaternion` | `(T,R,4)` | 每台机器人 TCP 的 world quaternion，wxyz |
 | `robot_ids/hand_types/hand_dof` | `(R,)` | 机器人轴的语义和有效手自由度 |
+| `policy_arm_q_target` | `(T,R,7)` | policy 输出的机械臂关节目标 |
+| `policy_hand_q_target` | `(T,R,12)` | policy 输出的手部关节目标 |
+| `policy_latency_ms` | `(T,)` | 每个观测帧的推理延迟 |
+| `policy_action_horizon` | `(T,)` | 每个 action chunk 的 horizon |
+| `policy_action_mode/policy_stage` | `(T,)` | 动作模式和运控阶段标签 |
 
-schema v2 的 `manifest.json` 还保存每台机器人的 id、hand type、handedness、基座位姿和关节名。旧 schema v1 episode 仍可验证。相机 `intrinsics`、`T_world_camera`、`T_camera_world` 和 MuJoCo 相机轴约定记录在每个 manifest。RGB、深度、分割和状态使用相同 `frame_id`；episode 先写入隐藏临时目录，全部完成后再原子改名并追加索引，因此浏览器不会看到半写入记录。
+schema v3 的 `manifest.json` 还保存 policy 类型、名称、任务、模型或 server provenance；schema v2 保存每台机器人的 id、hand type、handedness、基座位姿和关节名。旧 schema v1/v2 episode 仍可验证。相机 `intrinsics`、`T_world_camera`、`T_camera_world` 和 MuJoCo 相机轴约定记录在每个 manifest。RGB、深度、分割、policy action 和状态使用相同 `frame_id`；episode 先写入隐藏临时目录，全部完成后再原子改名并追加索引，因此浏览器不会看到半写入记录。
 
 ## 网页/API
 
