@@ -188,3 +188,16 @@ def test_xhand_position_actuators_track_closed_targets(tmp_path: Path) -> None:
         mujoco.mj_step(model, data)
 
     np.testing.assert_allclose(data.qpos[qpos_addresses], target, atol=0.03)
+
+
+def test_tro_xhand_actuators_use_configured_grasp_strength(tmp_path: Path) -> None:
+    from teaware_mujoco.config import load_config
+
+    config = load_config(REPO_ROOT / "configs/tro_xhand_mock.yaml")
+    path = write_scene_xml(config, tmp_path / "tro.xml")
+    model = mujoco.MjModel.from_xml_path(str(path))
+    actuator_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_ACTUATOR, "right_arm_xhand_act06"
+    )
+    assert model.actuator_gainprm[actuator_id, 0] == 35.0
+    np.testing.assert_allclose(model.actuator_forcerange[actuator_id], [-1.0, 1.0])

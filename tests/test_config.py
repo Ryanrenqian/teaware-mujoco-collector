@@ -73,6 +73,8 @@ def test_tro_configs_define_independent_local_and_mock_backends() -> None:
     assert local["policy"]["type"] == "tro_grasp"
     assert local["policy"]["tro"]["backend"] == "local"
     assert local["policy"]["tro"]["root"] == "${TRO_ROOT}"
+    assert local["robots"][0]["hand_actuator_force_scale"] == 2.5
+    assert local["robots"][0]["hand_actuator_kp"] == 35.0
     assert mock["policy"]["tro"]["backend"] == "centroid_mock"
     assert mock["policy"]["tro"]["grasp_constraint"]["enabled"] is True
 

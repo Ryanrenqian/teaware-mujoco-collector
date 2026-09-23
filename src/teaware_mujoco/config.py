@@ -312,6 +312,14 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             7,
             f"{path}.motion_amplitude",
         )
+        robot["hand_actuator_force_scale"] = float(
+            robot.get("hand_actuator_force_scale", 1.0)
+        )
+        robot["hand_actuator_kp"] = float(robot.get("hand_actuator_kp", 20.0))
+        if robot["hand_actuator_force_scale"] <= 0:
+            raise ConfigError(f"{path}.hand_actuator_force_scale must be positive")
+        if robot["hand_actuator_kp"] <= 0:
+            raise ConfigError(f"{path}.hand_actuator_kp must be positive")
         dof = hand_dof(hand)
         default_hand_home = list(XHAND_OPEN_Q) if hand == "xhand" else [0.0]
         robot["hand_home_q"] = _vec(

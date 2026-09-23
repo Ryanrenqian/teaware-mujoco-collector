@@ -471,6 +471,8 @@ def _add_xhand(
     actuator: ET.Element,
     robot_id: str,
     handedness: str,
+    force_scale: float,
+    actuator_kp: float,
 ) -> None:
     urdf = ET.parse(xhand_asset_dir() / f"xhand_{handedness}_extended.urdf").getroot()
     links = {link.attrib["name"]: link for link in urdf.findall("link")}
@@ -563,9 +565,9 @@ def _add_xhand(
             {
                 "name": f"{robot_id}_xhand_act{index:02d}",
                 "joint": f"{robot_id}_{urdf_joint.attrib['name']}",
-                "kp": "20",
+                "kp": f"{actuator_kp:.9g}",
                 "ctrlrange": f"{lower} {upper}",
-                "forcerange": _numbers([-effort, effort]),
+                "forcerange": _numbers([-effort * force_scale, effort * force_scale]),
             },
         )
 
@@ -606,7 +608,15 @@ def _append_robot(
     base.set("quat", _numbers([math.cos(half_yaw), 0.0, 0.0, math.sin(half_yaw)]))
     if spec["hand"] == "xhand":
         link7 = next(body for body in base.iter("body") if body.get("name") == f"{prefix}link7")
-        _add_xhand(link7, asset, actuator, spec["id"], spec["handedness"])
+        _add_xhand(
+            link7,
+            asset,
+            actuator,
+            spec["id"],
+            spec["handedness"],
+            spec["hand_actuator_force_scale"],
+            spec["hand_actuator_kp"],
+        )
     worldbody.append(base)
 
     for section_name, destination in (
