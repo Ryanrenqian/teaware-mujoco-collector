@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
+from teaware_mujoco.collector import _segmentation_from_idcolor
 from teaware_mujoco.schema import discover_episodes, validate_dataset, validate_episode
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_segmentation_idcolor_ignores_out_of_range_pixels() -> None:
+    pixels = np.array([[[1, 0, 0], [1, 4, 0]]], dtype=np.uint8)
+    scene = SimpleNamespace(
+        ngeom=1,
+        geoms=[SimpleNamespace(segid=0, objid=7, objtype=5)],
+    )
+    segmentation = _segmentation_from_idcolor(pixels, scene)
+
+    assert segmentation.tolist() == [[[7, 5], [-1, -1]]]
 
 
 def test_episode_contains_synchronized_modalities(collected_dataset: Path) -> None:

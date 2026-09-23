@@ -74,6 +74,26 @@ def _segmentation_preview(labels: np.ndarray) -> np.ndarray:
     return output
 
 
+def _segmentation_from_idcolor(image: np.ndarray, scene: Any) -> np.ndarray:
+    """Map MuJoCo ID-color pixels while treating invalid blended IDs as background."""
+    image3 = np.asarray(image, dtype=np.uint32)
+    segimage = image3[..., 0] + image3[..., 1] * (2**8) + image3[..., 2] * (2**16)
+    output = np.full((*segimage.shape, 2), -1, dtype=np.int32)
+    ngeoms = int(scene.ngeom)
+    valid = segimage <= ngeoms
+    if not np.any(valid):
+        return output
+
+    segid2output = np.full((ngeoms + 1, 2), -1, dtype=np.int32)
+    visible_geoms = [geom for geom in scene.geoms[:ngeoms] if geom.segid != -1]
+    for geom in visible_geoms:
+        segid = int(geom.segid) + 1
+        if 0 <= segid <= ngeoms:
+            segid2output[segid] = (int(geom.objid), int(geom.objtype))
+    output[valid] = segid2output[segimage[valid]]
+    return output
+
+
 class TeawareCollector:
     """Stateful MuJoCo scene and atomic episode writer."""
 
@@ -428,7 +448,20 @@ class TeawareCollector:
         self.renderer.disable_depth_rendering()
         self.renderer.enable_segmentation_rendering()
         self.renderer.update_scene(self.data, camera=camera_name)
-        segmentation = self.renderer.render().astype(np.int32, copy=True)
+        try:
+            segmentation = self.renderer.render().astype(np.int32, copy=True)
+        except IndexError:
+            # MuJoCo <= 3.8 can emit blended ID colors outside the segid table.
+            # The framebuffer is still valid, so remap it with explicit bounds checks.
+            renderer = self.renderer
+            scene = renderer._scene
+            pixels = np.empty((self.height, self.width, 3), dtype=np.uint8)
+            mujoco.mjr_readPixels(pixels, None, renderer._rect, renderer._mjr_context)
+            segmentation = _segmentation_from_idcolor(pixels, scene)
+            if renderer._gl_context:
+                segmentation = np.flipud(segmentation)
+            scene.flags[mujoco.mjtRndFlag.mjRND_SEGMENT] = False
+            scene.flags[mujoco.mjtRndFlag.mjRND_IDCOLOR] = False
         self.renderer.disable_segmentation_rendering()
         instance = np.full(segmentation.shape[:2], -1, dtype=np.int32)
         geom_pixels = (
