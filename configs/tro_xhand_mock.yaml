@@ -11,7 +11,7 @@ policy:
     backend: centroid_mock
     hand_type: xhand
     num_candidates: 1
-    grasp_constraint: {enabled: true, max_distance_m: 0.22}
+    grasp_constraint: {enabled: true, max_distance_m: 0.22, min_finger_contacts: 1, min_closure_norm_rad: 0.35}
 scene_profile: single_xhand_tro_mock
 table: {center: [0.42, 0.0, -0.035], size: [1.05, 0.82, 0.06], rgba: [0.42, 0.30, 0.20, 1.0]}
 robots:

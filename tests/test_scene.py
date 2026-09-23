@@ -113,3 +113,78 @@ def test_xhand_scene_uses_real_meshes_and_handed_urdf_kinematics(tmp_path: Path)
         np.testing.assert_allclose(
             np.fromstring(thumb.attrib["quat"], sep=" "), thumb_quat, atol=1e-8
         )
+
+        finger_joint = bend.find("joint")
+        assert finger_joint.attrib["armature"] == "0.01"
+        assert finger_joint.attrib["damping"] == "0.1"
+        assert finger_joint.attrib["frictionloss"] == "0.01"
+
+
+def test_xhand_position_actuators_track_closed_targets(tmp_path: Path) -> None:
+    from teaware_mujoco.config import load_config
+    from teaware_mujoco.robots import XHAND_OPEN_Q
+
+    config = load_config(REPO_ROOT / "configs/single_xhand.yaml")
+    path = write_scene_xml(config, tmp_path / "single.xml")
+    model = mujoco.MjModel.from_xml_path(str(path))
+    data = mujoco.MjData(model)
+    hand_joint_ids = np.asarray(
+        [
+            mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_JOINT,
+                f"right_arm_right_hand_{suffix}",
+            )
+            for suffix in (
+                "thumb_bend_joint",
+                "thumb_rota_joint1",
+                "thumb_rota_joint2",
+                "index_bend_joint",
+                "index_joint1",
+                "index_joint2",
+                "mid_joint1",
+                "mid_joint2",
+                "ring_joint1",
+                "ring_joint2",
+                "pinky_joint1",
+                "pinky_joint2",
+            )
+        ],
+        dtype=np.int32,
+    )
+    actuator_ids = np.asarray(
+        [
+            mujoco.mj_name2id(
+                model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"right_arm_xhand_act{index:02d}"
+            )
+            for index in range(1, 13)
+        ],
+        dtype=np.int32,
+    )
+    arm_joint_ids = np.asarray(
+        [
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"right_arm_joint{index}")
+            for index in range(1, 8)
+        ],
+        dtype=np.int32,
+    )
+    arm_actuator_ids = np.asarray(
+        [
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"right_arm_act{index}")
+            for index in range(1, 8)
+        ],
+        dtype=np.int32,
+    )
+    home_q = np.asarray(config["robots"][0]["home_q"])
+    data.qpos[model.jnt_qposadr[arm_joint_ids]] = home_q
+    data.ctrl[arm_actuator_ids] = home_q
+    qpos_addresses = model.jnt_qposadr[hand_joint_ids]
+    data.qpos[qpos_addresses] = XHAND_OPEN_Q
+    target = np.asarray([1.65, 0.6, 0.35, 0.0, 0.7, 0.5, 0.7, 0.5, 0.7, 0.5, 0.7, 0.5])
+    data.ctrl[actuator_ids] = target
+    mujoco.mj_forward(model, data)
+
+    for _ in range(round(1.0 / model.opt.timestep)):
+        mujoco.mj_step(model, data)
+
+    np.testing.assert_allclose(data.qpos[qpos_addresses], target, atol=0.03)

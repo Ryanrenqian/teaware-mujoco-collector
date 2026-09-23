@@ -131,10 +131,22 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             raise ConfigError("config.policy.tro.grasp_constraint must be a mapping")
         grasp_constraint.update(
             enabled=bool(grasp_constraint.get("enabled", False)),
-            max_distance_m=float(grasp_constraint.get("max_distance_m", 0.22)),
+            max_distance_m=float(grasp_constraint.get("max_distance_m", 0.16)),
+            min_finger_contacts=int(grasp_constraint.get("min_finger_contacts", 2)),
+            min_closure_norm_rad=float(grasp_constraint.get("min_closure_norm_rad", 0.35)),
         )
         if grasp_constraint["max_distance_m"] <= 0:
             raise ConfigError("policy.tro.grasp_constraint.max_distance_m must be positive")
+        if grasp_constraint["min_finger_contacts"] < 0:
+            raise ConfigError("policy.tro.grasp_constraint.min_finger_contacts cannot be negative")
+        if grasp_constraint["min_closure_norm_rad"] < 0:
+            raise ConfigError("policy.tro.grasp_constraint.min_closure_norm_rad cannot be negative")
+        if grasp_constraint["enabled"] and grasp_constraint["min_finger_contacts"] < 1:
+            raise ConfigError(
+                "enabled grasp_constraint requires at least one finger contact"
+            )
+        if grasp_constraint["enabled"] and grasp_constraint["min_closure_norm_rad"] <= 0:
+            raise ConfigError("enabled grasp_constraint requires positive hand closure")
         durations = tro.setdefault("stage_durations_s", {})
         if not isinstance(durations, dict):
             raise ConfigError("config.policy.tro.stage_durations_s must be a mapping")

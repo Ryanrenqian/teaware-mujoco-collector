@@ -125,6 +125,7 @@ class TeawareCollector:
         self.robots = [self._build_robot_runtime(spec) for spec in config["robots"]]
         self.policy = policy or build_policy(config, model=self.model, robots=self.robots)
         self._grasp_constraint = self._build_grasp_constraint()
+        self._episode_max_finger_contacts = 0
         self._lock = threading.RLock()
         self._current_seed: int | None = None
         self._latest_frames: dict[str, dict[str, np.ndarray]] = {}
@@ -221,36 +222,115 @@ class TeawareCollector:
         if policy["type"] != "tro_grasp":
             return None
         constraint = policy["tro"]["grasp_constraint"]
-        if not constraint["enabled"]:
-            return None
-        robot = next(runtime for runtime in self.robots if runtime["id"] == policy["robot_id"])
-        equality_name = f"{robot['id']}_{policy['target_object']}_grasp_weld"
-        equality_id = self._name_id(mujoco.mjtObj.mjOBJ_EQUALITY, equality_name)
+        robot_index, robot = next(
+            (index, runtime)
+            for index, runtime in enumerate(self.robots)
+            if runtime["id"] == policy["robot_id"]
+        )
         hand_body_name = f"{robot['id']}_{robot['handedness']}_hand_link"
+        hand_body_id = self._name_id(mujoco.mjtObj.mjOBJ_BODY, hand_body_name)
+        finger_prefix = f"{robot['id']}_{robot['handedness']}_hand_"
+        finger_body_ids = {
+            body_id
+            for body_id in range(self.model.nbody)
+            if (name := mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id))
+            and name.startswith(finger_prefix)
+            and body_id != hand_body_id
+        }
+        object_body_id = self._name_id(
+            mujoco.mjtObj.mjOBJ_BODY, policy["target_object"]
+        )
+        equality_id: int | None = None
+        if constraint["enabled"]:
+            equality_name = f"{robot['id']}_{policy['target_object']}_grasp_weld"
+            equality_id = self._name_id(mujoco.mjtObj.mjOBJ_EQUALITY, equality_name)
         return {
+            "enabled": bool(constraint["enabled"]),
             "equality_id": equality_id,
-            "hand_body_id": self._name_id(mujoco.mjtObj.mjOBJ_BODY, hand_body_name),
-            "object_body_id": self._name_id(mujoco.mjtObj.mjOBJ_BODY, policy["target_object"]),
+            "robot": robot,
+            "robot_index": robot_index,
+            "hand_body_id": hand_body_id,
+            "finger_geom_ids": {
+                geom_id
+                for geom_id, body_id in enumerate(self.model.geom_bodyid)
+                if int(body_id) in finger_body_ids
+            },
+            "object_geom_ids": {
+                geom_id
+                for geom_id, body_id in enumerate(self.model.geom_bodyid)
+                if int(body_id) == object_body_id
+            },
+            "object_body_id": object_body_id,
             "max_distance_m": float(constraint["max_distance_m"]),
+            "min_finger_contacts": int(constraint["min_finger_contacts"]),
+            "min_closure_norm_rad": float(constraint["min_closure_norm_rad"]),
         }
 
-    def _update_grasp_constraint(self, stage: str) -> None:
+    def _finger_contact_count(self, constraint: dict[str, Any]) -> int:
+        finger_geom_ids = constraint["finger_geom_ids"]
+        object_geom_ids = constraint["object_geom_ids"]
+        contacting_bodies: set[int] = set()
+        for contact in self.data.contact[: self.data.ncon]:
+            geom1, geom2 = int(contact.geom1), int(contact.geom2)
+            if geom1 in finger_geom_ids and geom2 in object_geom_ids:
+                contacting_bodies.add(int(self.model.geom_bodyid[geom1]))
+            elif geom2 in finger_geom_ids and geom1 in object_geom_ids:
+                contacting_bodies.add(int(self.model.geom_bodyid[geom2]))
+        return len(contacting_bodies)
+
+    def _grasp_metrics(self, hand_targets: np.ndarray) -> dict[str, float | int | bool]:
+        constraint = self._grasp_constraint
+        if constraint is None:
+            return {
+                "finger_contacts": 0,
+                "constraint_active": False,
+                "closure_norm_rad": 0.0,
+                "hand_tracking_rmse_rad": 0.0,
+                "palm_object_distance_m": 0.0,
+            }
+        robot = constraint["robot"]
+        actual = self.data.qpos[robot["hand_qpos_addresses"]]
+        target = hand_targets[constraint["robot_index"], : robot["hand_dof"]]
+        contacts = self._finger_contact_count(constraint)
+        self._episode_max_finger_contacts = max(self._episode_max_finger_contacts, contacts)
+        equality_id = constraint["equality_id"]
+        return {
+            "finger_contacts": contacts,
+            "constraint_active": bool(
+                equality_id is not None and self.data.eq_active[equality_id]
+            ),
+            "closure_norm_rad": float(np.linalg.norm(actual - robot["hand_home_q"])),
+            "hand_tracking_rmse_rad": float(np.sqrt(np.mean(np.square(actual - target)))),
+            "palm_object_distance_m": float(
+                np.linalg.norm(
+                    self.data.xpos[constraint["hand_body_id"]]
+                    - self.data.xpos[constraint["object_body_id"]]
+                )
+            ),
+        }
+
+    def _update_grasp_constraint(self, stage: str, hand_targets: np.ndarray) -> None:
         constraint = self._grasp_constraint
         if constraint is None:
             return
+        metrics = self._grasp_metrics(hand_targets)
+        if not constraint["enabled"]:
+            return
         equality_id = constraint["equality_id"]
+        assert equality_id is not None
         if stage == "release":
             self.data.eq_active[equality_id] = 0
             return
         if stage != "close" or self.data.eq_active[equality_id]:
             return
+        if metrics["palm_object_distance_m"] > constraint["max_distance_m"]:
+            return
+        if metrics["finger_contacts"] < constraint["min_finger_contacts"]:
+            return
+        if metrics["closure_norm_rad"] < constraint["min_closure_norm_rad"]:
+            return
         hand_body_id = constraint["hand_body_id"]
         object_body_id = constraint["object_body_id"]
-        distance = float(
-            np.linalg.norm(self.data.xpos[hand_body_id] - self.data.xpos[object_body_id])
-        )
-        if distance > constraint["max_distance_m"]:
-            return
         inverse_position = np.empty(3, dtype=np.float64)
         inverse_quaternion = np.empty(4, dtype=np.float64)
         relative_position = np.empty(3, dtype=np.float64)
@@ -303,6 +383,7 @@ class TeawareCollector:
 
     def _reset(self) -> None:
         mujoco.mj_resetData(self.model, self.data)
+        self._episode_max_finger_contacts = 0
         for robot in self.robots:
             self.data.qpos[robot["arm_qpos_addresses"]] = robot["home_q"]
             self.data.ctrl[robot["arm_actuator_ids"]] = robot["home_q"]
@@ -591,6 +672,11 @@ class TeawareCollector:
         policy_horizon_rows: list[int] = []
         policy_mode_rows: list[str] = []
         policy_stage_rows: list[str] = []
+        finger_contact_rows: list[int] = []
+        grasp_constraint_active_rows: list[bool] = []
+        hand_closure_norm_rows: list[float] = []
+        hand_tracking_rmse_rows: list[float] = []
+        palm_object_distance_rows: list[float] = []
         frame_records: list[dict[str, Any]] = []
 
         for frame_index, relative_time in enumerate(frame_times):
@@ -599,6 +685,12 @@ class TeawareCollector:
                 elapsed = float(self.data.time - start_time)
                 arm_targets, hand_targets = policy_runner.targets_at(elapsed)
                 self._apply_policy_targets(arm_targets, hand_targets)
+                stage = (
+                    str(policy_runner.chunk.metadata.get("stage", ""))
+                    if policy_runner.chunk is not None
+                    else ""
+                )
+                self._update_grasp_constraint(stage, hand_targets)
                 mujoco.mj_step(self.model, self.data)
 
             modalities = self._render_all()
@@ -614,9 +706,10 @@ class TeawareCollector:
             if frame_index == 0:
                 policy_runner.reset(seed, observation)
             chunk = policy_runner.submit(observation)
-            self._update_grasp_constraint(str(chunk.metadata.get("stage", "")))
             arm_targets, hand_targets = policy_runner.targets_at(float(relative_time))
             self._apply_policy_targets(arm_targets, hand_targets)
+            self._update_grasp_constraint(str(chunk.metadata.get("stage", "")), hand_targets)
+            grasp_metrics = self._grasp_metrics(hand_targets)
             frame_id = f"{frame_index:06d}"
             frame_dir = frame_root / frame_id
             frame_dir.mkdir()
@@ -665,6 +758,11 @@ class TeawareCollector:
             policy_horizon_rows.append(chunk.horizon)
             policy_mode_rows.append(chunk.action_mode)
             policy_stage_rows.append(str(chunk.metadata.get("stage", "")))
+            finger_contact_rows.append(int(grasp_metrics["finger_contacts"]))
+            grasp_constraint_active_rows.append(bool(grasp_metrics["constraint_active"]))
+            hand_closure_norm_rows.append(float(grasp_metrics["closure_norm_rad"]))
+            hand_tracking_rmse_rows.append(float(grasp_metrics["hand_tracking_rmse_rad"]))
+            palm_object_distance_rows.append(float(grasp_metrics["palm_object_distance_m"]))
             frame_records.append(
                 {
                     "frame_id": frame_id,
@@ -698,10 +796,34 @@ class TeawareCollector:
             policy_action_horizon=np.asarray(policy_horizon_rows, dtype=np.int32),
             policy_action_mode=np.asarray(policy_mode_rows),
             policy_stage=np.asarray(policy_stage_rows),
+            grasp_finger_contacts=np.asarray(finger_contact_rows, dtype=np.int32),
+            grasp_constraint_active=np.asarray(grasp_constraint_active_rows, dtype=np.bool_),
+            hand_closure_norm_rad=np.asarray(hand_closure_norm_rows, dtype=np.float64),
+            hand_tracking_rmse_rad=np.asarray(hand_tracking_rmse_rows, dtype=np.float64),
+            palm_object_distance_m=np.asarray(palm_object_distance_rows, dtype=np.float64),
             robot_ids=np.asarray([robot["id"] for robot in self.robots]),
             hand_types=np.asarray([robot["hand"] for robot in self.robots]),
             hand_dof=np.asarray([robot["hand_dof"] for robot in self.robots], dtype=np.int32),
         )
+        grasp_outcome: dict[str, Any] | None = None
+        if self._grasp_constraint is not None:
+            target_index = self.object_names.index(self.config["policy"]["target_object"])
+            target_z = np.asarray(body_pos_rows, dtype=np.float64)[:, target_index, 2]
+            lift_delta_m = float(np.max(target_z) - target_z[0])
+            assisted = bool(np.any(grasp_constraint_active_rows))
+            min_contacts = 1 if assisted else 2
+            grasp_outcome = {
+                "success": bool(
+                    lift_delta_m >= 0.05
+                    and self._episode_max_finger_contacts >= min_contacts
+                ),
+                "assisted": assisted,
+                "lift_delta_m": lift_delta_m,
+                "max_finger_contacts": int(self._episode_max_finger_contacts),
+                "max_hand_closure_norm_rad": float(max(hand_closure_norm_rows, default=0.0)),
+                "max_hand_tracking_rmse_rad": float(max(hand_tracking_rmse_rows, default=0.0)),
+            }
+
         manifest = {
             "schema_version": SCHEMA_VERSION,
             "episode_id": episode_id,
@@ -742,6 +864,7 @@ class TeawareCollector:
                 "body_label_map": self._instance_label_map(),
             },
             "randomization": randomization,
+            **({"grasp_outcome": grasp_outcome} if grasp_outcome is not None else {}),
             "frames": frame_records,
             "trajectory": {
                 "path": "trajectory.npz",
@@ -767,6 +890,11 @@ class TeawareCollector:
                     "policy_action_horizon": "(T,)",
                     "policy_action_mode": "(T,)",
                     "policy_stage": "(T,)",
+                    "grasp_finger_contacts": "(T,) distinct contacting finger links",
+                    "grasp_constraint_active": "(T,) boolean",
+                    "hand_closure_norm_rad": "(T,) L2 distance from open hand pose",
+                    "hand_tracking_rmse_rad": "(T,) joint target tracking RMSE",
+                    "palm_object_distance_m": "(T,) metres",
                     "robot_ids": "(robot,)",
                     "hand_types": "(robot,)",
                     "hand_dof": "(robot,)",

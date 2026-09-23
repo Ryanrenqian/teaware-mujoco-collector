@@ -219,7 +219,15 @@ def test_tro_mock_policy_plans_and_lifts_target_object(tmp_path: Path) -> None:
     with np.load(episode / "trajectory.npz", allow_pickle=False) as trajectory:
         stages = list(dict.fromkeys(trajectory["policy_stage"].tolist()))
         target_z = trajectory["body_position"][:, 0, 2]
+        constraint_active = trajectory["grasp_constraint_active"]
+        contacts = trajectory["grasp_finger_contacts"]
+        close_indices = np.flatnonzero(trajectory["policy_stage"] == "close")
         assert target_z.max() > target_z[0] + 0.04
+        assert not constraint_active[close_indices[0]]
+        assert np.any(constraint_active)
+        assert np.all(contacts[constraint_active] >= 1)
     assert manifest["policy"]["type"] == "tro_grasp"
     assert manifest["policy"]["tro"]["backend"] == "centroid_mock"
+    assert manifest["grasp_outcome"]["success"] is True
+    assert manifest["grasp_outcome"]["assisted"] is True
     assert stages == ["pregrasp", "grasp", "close", "lift", "return", "release"]

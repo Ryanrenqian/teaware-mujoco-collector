@@ -167,6 +167,7 @@ def create_app(config: dict[str, Any], dataset_root: str | Path) -> FastAPI:
                     "seed": manifest["seed"],
                     "frame_count": len(manifest["frames"]),
                     "valid": not validate_episode(episode_dir),
+                    "grasp_outcome": manifest.get("grasp_outcome"),
                 }
             )
         return output

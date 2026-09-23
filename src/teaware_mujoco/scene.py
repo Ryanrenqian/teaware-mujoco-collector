@@ -381,7 +381,14 @@ def _add_xhand_geometry(
         if color is not None:
             attributes["rgba"] = color.get("rgba", "0.8 0.8 0.8 1")
     else:
-        attributes.update(rgba="0 0 0 0", friction="0.9 0.02 0.001")
+        # Dedicated contact type prevents finger links from blocking each other,
+        # while conaffinity keeps contact with ordinary scene/object geoms.
+        attributes.update(
+            rgba="0 0 0 0",
+            friction="0.9 0.02 0.001",
+            contype="2",
+            conaffinity="1",
+        )
     ET.SubElement(body, "geom", attributes)
 
 
@@ -435,16 +442,17 @@ def _populate_xhand_link(
         )
         if urdf_joint.get("type") != "fixed":
             limit = urdf_joint.find("limit")
-            dynamics = urdf_joint.find("dynamics")
             joint_attributes = {
                 "name": f"{robot_id}_{urdf_joint.attrib['name']}",
                 "type": "hinge",
                 "axis": _numbers(_xyz(urdf_joint.find("axis"), "xyz", "1 0 0")),
                 "range": f"{limit.attrib['lower']} {limit.attrib['upper']}",
+                # The hardware URDF uses Coulomb friction values comparable to its
+                # effort limits. In MuJoCo that stalls position actuators entirely.
+                "armature": "0.01",
+                "damping": "0.1",
+                "frictionloss": "0.01",
             }
-            if dynamics is not None:
-                joint_attributes["damping"] = dynamics.get("damping", "0")
-                joint_attributes["frictionloss"] = dynamics.get("friction", "0")
             ET.SubElement(child_body, "joint", joint_attributes)
         _populate_xhand_link(
             body=child_body,
@@ -515,6 +523,8 @@ def _add_xhand(
         mesh=flange_mesh,
         rgba=[0.0, 0.0, 0.0, 0.0],
         friction=[0.9, 0.02, 0.001],
+        contype=2,
+        conaffinity=1,
         group=3,
     )
     hand_rpy = [-1.5707963, 0.0, 3.1415926] if handedness == "left" else [1.5707963, 0.0, 0.0]
@@ -553,7 +563,7 @@ def _add_xhand(
             {
                 "name": f"{robot_id}_xhand_act{index:02d}",
                 "joint": f"{robot_id}_{urdf_joint.attrib['name']}",
-                "kp": "18",
+                "kp": "20",
                 "ctrlrange": f"{lower} {upper}",
                 "forcerange": _numbers([-effort, effort]),
             },

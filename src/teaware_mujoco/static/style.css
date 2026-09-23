@@ -74,6 +74,9 @@ aside section { padding: 16px; border-bottom: 1px solid var(--line); }
 .episode small { color: var(--muted); }
 .valid { color: var(--accent); }
 .invalid { color: var(--danger); }
+.success { color: var(--accent) !important; }
+.failure { color: var(--danger) !important; }
+.unknown { color: var(--muted) !important; }
 pre { margin: 10px 0 0; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #bdc3c0; font: 11px/1.55 ui-monospace, monospace; }
 
 @media (max-width: 860px) {

@@ -54,11 +54,18 @@ async function loadStatus() {
 
 async function loadEpisodes() {
   const episodes = await api("/api/episodes");
-  $("episodes").innerHTML = episodes.length ? episodes.map((episode) => `
+  $("episodes").innerHTML = episodes.length ? episodes.map((episode) => {
+    const grasp = episode.grasp_outcome;
+    const graspLabel = grasp
+      ? (grasp.success ? (grasp.assisted ? "ASSISTED PASS" : "PHYSICS PASS") : "GRASP FAIL")
+      : "GRASP UNKNOWN";
+    const graspClass = grasp ? (grasp.success ? "success" : "failure") : "unknown";
+    return `
     <button class="episode ${state.episode?.manifest.episode_id === episode.episode_id ? "active" : ""}" data-id="${episode.episode_id}">
-      <span>${episode.episode_id}</span><span class="${episode.valid ? "valid" : "invalid"}">${episode.valid ? "VALID" : "INVALID"}</span>
-      <small>seed ${episode.seed}</small><small>${episode.frame_count} frames</small>
-    </button>`).join("") : `<small>暂无采集记录</small>`;
+      <span>${episode.episode_id}</span><span class="${episode.valid ? "valid" : "invalid"}">${episode.valid ? "DATA OK" : "DATA INVALID"}</span>
+      <small>seed ${episode.seed} / ${episode.frame_count} frames</small><small class="${graspClass}">${graspLabel}</small>
+    </button>`;
+  }).join("") : `<small>暂无采集记录</small>`;
   document.querySelectorAll(".episode").forEach((button) => {
     button.addEventListener("click", () => selectEpisode(button.dataset.id));
   });
@@ -79,6 +86,7 @@ async function selectEpisode(id) {
     robots: detail.manifest.robots,
     objects: detail.manifest.objects,
     policy: detail.manifest.policy,
+    grasp_outcome: detail.manifest.grasp_outcome ?? null,
     validation_errors: detail.validation_errors,
     config_sha256: detail.manifest.config_sha256,
   }, null, 2);

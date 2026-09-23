@@ -19,6 +19,7 @@ def test_web_lists_and_renders_episode(collected_dataset: Path, tiny_config: dic
         episodes = client.get("/api/episodes").json()
         assert episodes[0]["episode_id"] == "episode_000000"
         assert episodes[0]["valid"] is True
+        assert episodes[0]["grasp_outcome"] is None
 
         image = client.get(
             "/api/episodes/episode_000000/image",

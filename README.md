@@ -154,7 +154,7 @@ TRO checkout 需要包含 `model/vqvae_encoder.py` 以及部署 YAML 所引用�
 
 `hand_q` 可以省略：本地 raw TRO backend 会把 `pred_links` 交给 MuJoCo xHand IK；HTTP backend 也可以返回 `finger_q`/`q_pk` 的 joint-name mapping。候选位姿采用机器人 base frame，长度单位为米，旋转矩阵为右手系。
 
-`tro.grasp_constraint.enabled` 控制仿真抓取稳定器。启用后，只有手掌进入 `max_distance_m` 且阶段进入 `close` 才建立当前相对位姿的 MuJoCo weld，`release` 阶段自动解除。该设置会写入 episode policy provenance；要评估纯接触物理时将其设为 `false`。
+`tro.grasp_constraint.enabled` 控制仿真抓取稳定器，正式 TRO 配置默认关闭以评估纯接触物理。启用后，必须同时满足 `max_distance_m`、`min_finger_contacts` 和 `min_closure_norm_rad`，才会在 `close` 阶段建立当前相对位姿的 MuJoCo weld；`release` 阶段自动解除。每条轨迹记录不同手指接触数、约束状态、闭合量、关节跟踪误差和手掌距离，manifest 的 `grasp_outcome` 将物理结果与文件结构校验分开标注。
 
 ## Policy 与 VLA
 

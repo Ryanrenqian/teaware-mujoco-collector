@@ -20,7 +20,7 @@ policy:
     noise_lambda: 0.2
     object_points: 2048
     environment_points: 4096
-    grasp_constraint: {enabled: true, max_distance_m: 0.22}
+    grasp_constraint: {enabled: false, max_distance_m: 0.16, min_finger_contacts: 2, min_closure_norm_rad: 0.35}
 scene_profile: single_xhand_tro
 table: {center: [0.42, 0.0, -0.035], size: [1.05, 0.82, 0.06], rgba: [0.42, 0.30, 0.20, 1.0]}
 robots:
