@@ -199,5 +199,5 @@ def test_tro_xhand_actuators_use_configured_grasp_strength(tmp_path: Path) -> No
     actuator_id = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_ACTUATOR, "right_arm_xhand_act06"
     )
-    assert model.actuator_gainprm[actuator_id, 0] == 35.0
+    assert model.actuator_gainprm[actuator_id, 0] == 20.0
     np.testing.assert_allclose(model.actuator_forcerange[actuator_id], [-1.0, 1.0])

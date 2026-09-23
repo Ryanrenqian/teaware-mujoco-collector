@@ -32,7 +32,7 @@ robots:
     home_q: [0.0, -0.247, 0.0, 0.909, 0.0, 1.15644, 0.0]
     motion_amplitude: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     hand_actuator_force_scale: 2.5
-    hand_actuator_kp: 35.0
+    hand_actuator_kp: 20.0
     hand_home_q: [1.45, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     hand_motion_amplitude: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 randomization: {minimum_object_distance: 0.13, max_placement_attempts: 200}
