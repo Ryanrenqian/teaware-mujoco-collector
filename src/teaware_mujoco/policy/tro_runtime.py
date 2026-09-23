@@ -187,3 +187,8 @@ class LocalTRORuntime:
         self.model = None
         if self.device.type == "cuda":
             self.torch.cuda.empty_cache()
+
+    def seed(self, seed: int) -> None:
+        self.torch.manual_seed(int(seed))
+        if self.device.type == "cuda":
+            self.torch.cuda.manual_seed_all(int(seed))

@@ -252,6 +252,7 @@ class TROGraspPolicy:
         policy = config["policy"]
         tro = policy["tro"]
         self.config = config
+        self.model = model
         self.robots = robots
         self.control_hz = float(policy["control_hz"])
         self.action_horizon = int(policy["action_horizon"])
@@ -271,6 +272,28 @@ class TROGraspPolicy:
             environment_points=tro["environment_points"],
         )
         self.ik = MuJoCoIKPlanner(model, robots)
+        hand_prefix = f"{self.robot['id']}_{self.robot['handedness']}_hand_"
+        palm_name = f"{self.robot['id']}_{self.robot['handedness']}_hand_link"
+        finger_body_ids = {
+            body_id
+            for body_id in range(model.nbody)
+            if (name := mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id))
+            and name.startswith(hand_prefix)
+            and name != palm_name
+        }
+        self.finger_geom_ids = {
+            geom_id
+            for geom_id, body_id in enumerate(model.geom_bodyid)
+            if int(body_id) in finger_body_ids
+        }
+        self.object_body_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_BODY, self.target_object
+        )
+        self.object_geom_ids = {
+            geom_id
+            for geom_id, body_id in enumerate(model.geom_bodyid)
+            if int(body_id) == self.object_body_id
+        }
         self.arm_plan: np.ndarray | None = None
         self.hand_plan: np.ndarray | None = None
         self.stages: list[str] = []
@@ -435,8 +458,61 @@ class TROGraspPolicy:
         }
         return np.concatenate(arm_segments), np.concatenate(hand_segments), stages, info
 
+    def _rollout_candidate(
+        self,
+        planned: tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]],
+        observation: PolicyObservation,
+    ) -> dict[str, float | int]:
+        arm_plan, hand_plan, stages, _ = planned
+        data = mujoco.MjData(self.model)
+        for robot_index, robot in enumerate(self.robots):
+            arm_q = observation.arm_qpos[robot_index]
+            hand_q = observation.hand_qpos[robot_index, : robot["hand_dof"]]
+            data.qpos[robot["arm_qpos_addresses"]] = arm_q
+            data.qpos[robot["hand_qpos_addresses"]] = hand_q
+            data.ctrl[robot["arm_actuator_ids"]] = arm_q
+            data.ctrl[robot["hand_actuator_ids"]] = hand_q
+        for object_index, object_name in enumerate(observation.object_names):
+            joint_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{object_name}_free"
+            )
+            if joint_id < 0:
+                continue
+            address = int(self.model.jnt_qposadr[joint_id])
+            data.qpos[address : address + 3] = observation.object_position[object_index]
+            data.qpos[address + 3 : address + 7] = observation.object_quaternion[object_index]
+        mujoco.mj_forward(self.model, data)
+
+        initial_z = float(data.xpos[self.object_body_id, 2])
+        max_z = initial_z
+        max_contacts = 0
+        simulation_steps = max(1, round(self.dt_s / self.model.opt.timestep))
+        robot = self.robot
+        for arm_target, hand_target, stage in zip(arm_plan, hand_plan, stages):
+            data.ctrl[robot["arm_actuator_ids"]] = arm_target
+            data.ctrl[robot["hand_actuator_ids"]] = hand_target
+            for _ in range(simulation_steps):
+                mujoco.mj_step(self.model, data)
+                if stage in {"close", "lift"}:
+                    contacting_bodies: set[int] = set()
+                    for contact in data.contact[: data.ncon]:
+                        geom1, geom2 = int(contact.geom1), int(contact.geom2)
+                        if geom1 in self.finger_geom_ids and geom2 in self.object_geom_ids:
+                            contacting_bodies.add(int(self.model.geom_bodyid[geom1]))
+                        elif geom2 in self.finger_geom_ids and geom1 in self.object_geom_ids:
+                            contacting_bodies.add(int(self.model.geom_bodyid[geom2]))
+                    max_contacts = max(max_contacts, len(contacting_bodies))
+                if stage == "lift":
+                    max_z = max(max_z, float(data.xpos[self.object_body_id, 2]))
+        return {
+            "rollout_lift_delta_m": max_z - initial_z,
+            "rollout_max_finger_contacts": max_contacts,
+        }
+
     def reset(self, seed: int, initial_observation: PolicyObservation) -> None:
-        del seed
+        seed_backend = getattr(self.backend, "seed", None)
+        if callable(seed_backend):
+            seed_backend(int(seed))
         object_points, environment_points = self.pointclouds.build(
             initial_observation,
             target_object=self.target_object,
@@ -445,19 +521,32 @@ class TROGraspPolicy:
         candidates = self.backend.infer(object_points, environment_points)
         if not candidates:
             raise RuntimeError("TRO returned no grasp candidates")
+        feasible: list[tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]]] = []
         for candidate in sorted(candidates, key=lambda item: int(item.get("rank", 0))):
             planned = self._plan_candidate(candidate, initial_observation)
             if planned is not None:
-                selected_arm, selected_hand, self.stages, self.plan_info = planned
-                robot_count = initial_observation.robot_count
-                frame_count = len(selected_arm)
-                self.arm_plan = np.repeat(initial_observation.arm_qpos[None], frame_count, axis=0)
-                self.hand_plan = np.repeat(initial_observation.hand_qpos[None], frame_count, axis=0)
-                self.arm_plan[:, self.robot_index] = selected_arm
-                self.hand_plan[:, self.robot_index] = selected_hand
-                assert self.arm_plan.shape == (frame_count, robot_count, 7)
-                return
-        raise RuntimeError(f"none of the {len(candidates)} TRO candidates was reachable")
+                rollout = self._rollout_candidate(planned, initial_observation)
+                planned[3].update(rollout)
+                feasible.append(planned)
+        if not feasible:
+            raise RuntimeError(f"none of the {len(candidates)} TRO candidates was reachable")
+
+        selected_arm, selected_hand, self.stages, self.plan_info = max(
+            feasible,
+            key=lambda planned: (
+                float(planned[3]["rollout_lift_delta_m"]),
+                int(planned[3]["rollout_max_finger_contacts"]),
+                -int(planned[3]["candidate_rank"]),
+            ),
+        )
+        self.plan_info["reachable_candidate_count"] = len(feasible)
+        robot_count = initial_observation.robot_count
+        frame_count = len(selected_arm)
+        self.arm_plan = np.repeat(initial_observation.arm_qpos[None], frame_count, axis=0)
+        self.hand_plan = np.repeat(initial_observation.hand_qpos[None], frame_count, axis=0)
+        self.arm_plan[:, self.robot_index] = selected_arm
+        self.hand_plan[:, self.robot_index] = selected_hand
+        assert self.arm_plan.shape == (frame_count, robot_count, 7)
 
     def act(self, observation: PolicyObservation) -> ActionChunk:
         if self.arm_plan is None or self.hand_plan is None:
@@ -472,7 +561,7 @@ class TROGraspPolicy:
         )
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "type": "tro_grasp",
             "name": "tro_mujoco_ik_grasp_v1",
             "robot_id": self.robot["id"],
@@ -482,6 +571,9 @@ class TROGraspPolicy:
             "grasp_constraint": dict(self.tro["grasp_constraint"]),
             "tro": self.backend.metadata(),
         }
+        if self.plan_info:
+            metadata["selected_candidate"] = dict(self.plan_info)
+        return metadata
 
     def close(self) -> None:
         self.backend.close()
