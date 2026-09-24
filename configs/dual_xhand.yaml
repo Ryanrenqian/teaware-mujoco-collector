@@ -29,7 +29,12 @@ robots:
     motion_amplitude: [0.025, 0.02, 0.025, 0.02, 0.02, 0.02, 0.025]
     hand_home_q: [1.45, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     hand_motion_amplitude: [0.02, 0.03, 0.03, 0.01, 0.05, 0.04, 0.05, 0.04, 0.05, 0.04, 0.05, 0.04]
-randomization: {minimum_object_distance: 0.13, max_placement_attempts: 200}
+randomization:
+  minimum_object_distance: 0.13
+  edge_margin_m: 0.02
+  minimum_object_gap_m: 0.01
+  max_placement_attempts: 200
+  max_scene_attempts: 20
 cameras:
   - {name: front_left, position: [1.25, -1.05, 0.92], target: [0.45, 0.0, 0.08], fovy: 52}
   - {name: front_right, position: [1.25, 1.05, 0.92], target: [0.45, 0.0, 0.08], fovy: 52}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -42,14 +43,21 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     duration_s = float(simulation.get("duration_s", 1.0))
     capture_fps = float(simulation.get("capture_fps", 10.0))
     settle_s = float(simulation.get("settle_s", 0.4))
-    if min(timestep, duration_s, capture_fps) <= 0 or settle_s < 0:
-        raise ConfigError("simulation timing values must be positive (settle_s may be zero)")
+    if (
+        not all(math.isfinite(value) for value in (timestep, duration_s, capture_fps, settle_s))
+        or min(timestep, duration_s, capture_fps) <= 0 or settle_s < 0
+    ):
+        raise ConfigError("simulation timing must be finite and positive (settle_s may be zero)")
     simulation.update(
         timestep=timestep,
         duration_s=duration_s,
         capture_fps=capture_fps,
         settle_s=settle_s,
     )
+    settle_timeout_s = float(simulation.get("settle_timeout_s", max(1.5, settle_s + 0.1)))
+    if not math.isfinite(settle_timeout_s) or settle_timeout_s < max(settle_s, 0.1):
+        raise ConfigError("simulation.settle_timeout_s must be finite and >= max(settle_s, 0.1)")
+    simulation["settle_timeout_s"] = settle_timeout_s
 
     policy = config.setdefault("policy", {})
     if not isinstance(policy, dict):
@@ -251,16 +259,30 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         if (
             randomization["x"][0] > randomization["x"][1]
             or randomization["y"][0] > randomization["y"][1]
+            or randomization["yaw_deg"][0] > randomization["yaw_deg"][1]
+            or not all(
+                math.isfinite(value)
+                for key in ("x", "y", "yaw_deg") for value in randomization[key]
+            )
         ):
-            raise ConfigError(f"{path}.randomization ranges must be ascending")
+            raise ConfigError(f"{path}.randomization ranges must be finite and ascending")
 
     randomization = config.setdefault("randomization", {})
-    randomization["minimum_object_distance"] = float(
-        randomization.get("minimum_object_distance", 0.12)
-    )
-    randomization["max_placement_attempts"] = int(randomization.get("max_placement_attempts", 200))
-    if randomization["minimum_object_distance"] < 0:
-        raise ConfigError("randomization.minimum_object_distance must be non-negative")
+    if not isinstance(randomization, dict):
+        raise ConfigError("config.randomization must be a mapping")
+    for key, default in (
+        ("minimum_object_distance", 0.12), ("edge_margin_m", 0.02), ("minimum_object_gap_m", 0.01)
+    ):
+        value = float(randomization.get(key, default))
+        if not math.isfinite(value) or value < 0 or (key == "minimum_object_gap_m" and value == 0):
+            requirement = "positive" if key == "minimum_object_gap_m" else "non-negative"
+            raise ConfigError(f"randomization.{key} must be finite and {requirement}")
+        randomization[key] = value
+    for key, default in (("max_placement_attempts", 200), ("max_scene_attempts", 20)):
+        value = float(randomization.get(key, default))
+        if not math.isfinite(value) or not value.is_integer() or value < 1:
+            raise ConfigError(f"randomization.{key} must be a positive integer")
+        randomization[key] = int(value)
 
     legacy_robot = config.pop("robot", None)
     robots = config.get("robots")
