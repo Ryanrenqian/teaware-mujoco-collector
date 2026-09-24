@@ -16,6 +16,7 @@ from PIL import Image
 
 from . import __version__
 from .config import config_sha256, public_config
+from .placement import PlacementError, TrayPlacement
 from .policy import Policy, PolicyObservation, PolicyRunner, build_policy
 from .robots import (
     ARM_ACTUATOR_SUFFIXES,
@@ -24,7 +25,7 @@ from .robots import (
     xhand_actuator_names,
     xhand_joint_names,
 )
-from .scene import object_spawn_height, table_top_z, write_scene_xml, yaw_quaternion
+from .scene import write_scene_xml, yaw_quaternion
 from .schema import SCHEMA_VERSION
 
 
@@ -112,6 +113,7 @@ class TeawareCollector:
         self.scene_xml = write_scene_xml(config, self.runtime_root / "scene.xml")
         self.model = mujoco.MjModel.from_xml_path(str(self.scene_xml))
         self.data = mujoco.MjData(self.model)
+        self.placement = TrayPlacement(self.model, config)
         self.width = int(config["renderer"]["width"])
         self.height = int(config["renderer"]["height"])
         self.renderer = mujoco.Renderer(self.model, height=self.height, width=self.width)
@@ -473,50 +475,51 @@ class TeawareCollector:
             )
 
     def _sample_placements(self, rng: np.random.Generator) -> list[tuple[float, float, float]]:
-        minimum_distance = float(self.config["randomization"]["minimum_object_distance"])
-        max_attempts = int(self.config["randomization"]["max_placement_attempts"])
-        placements: list[tuple[float, float, float]] = []
-        for spec in self.object_specs:
-            ranges = spec["randomization"]
-            for _ in range(max_attempts):
-                x = float(rng.uniform(*ranges["x"]))
-                y = float(rng.uniform(*ranges["y"]))
-                if all(
-                    np.hypot(x - old_x, y - old_y) >= minimum_distance
-                    for old_x, old_y, _ in placements
-                ):
-                    yaw = float(rng.uniform(*ranges["yaw_deg"]))
-                    placements.append((x, y, yaw))
-                    break
-            else:
-                raise RuntimeError(
-                    f"could not place {spec['name']!r}; relax minimum_object_distance or ranges"
-                )
-        return placements
+        return self.placement.sample(rng)
 
     def randomize(self, seed: int) -> dict[str, Any]:
         with self._lock:
             rng = np.random.default_rng(int(seed))
-            self._reset()
-            placements = self._sample_placements(rng)
-            support_z = table_top_z(self.config) + 0.016
-            sampled: dict[str, Any] = {}
-            for spec, (x, y, yaw) in zip(self.object_specs, placements):
-                joint_id = self._name_id(mujoco.mjtObj.mjOBJ_JOINT, f"{spec['name']}_free")
-                qpos_address = int(self.model.jnt_qposadr[joint_id])
-                position = [x, y, object_spawn_height(spec, support_z)]
-                self.data.qpos[qpos_address : qpos_address + 3] = position
-                self.data.qpos[qpos_address + 3 : qpos_address + 7] = yaw_quaternion(yaw)
-                sampled[spec["name"]] = {"position": position, "yaw_deg": yaw}
-            mujoco.mj_forward(self.model, self.data)
-            settle_steps = round(
-                float(self.config["simulation"]["settle_s"]) / self.model.opt.timestep
+            self._current_seed = None
+            self._latest_frames = {}
+            attempts = self.config["randomization"]["max_scene_attempts"]
+            last_issues = []
+            for attempt in range(1, attempts + 1):
+                self._reset()
+                try:
+                    placements = self._sample_placements(rng)
+                except PlacementError as exc:
+                    last_issues = [str(exc)]
+                    continue
+                sampled: dict[str, Any] = {}
+                for index, (spec, (x, y, yaw)) in enumerate(zip(self.object_specs, placements)):
+                    joint_id = self._name_id(mujoco.mjtObj.mjOBJ_JOINT, f"{spec['name']}_free")
+                    qpos_address = int(self.model.jnt_qposadr[joint_id])
+                    position = [x, y, self.placement.spawn_height(index)]
+                    self.data.qpos[qpos_address : qpos_address + 3] = position
+                    self.data.qpos[qpos_address + 3 : qpos_address + 7] = yaw_quaternion(yaw)
+                    sampled[spec["name"]] = {"position": position, "yaw_deg": yaw}
+                mujoco.mj_forward(self.model, self.data)
+                report = self.placement.settle(
+                    self.data,
+                    self.config["simulation"]["settle_s"],
+                    self.config["simulation"]["settle_timeout_s"],
+                )
+                if not report["valid"]:
+                    last_issues = report["issues"]
+                    continue
+                self._latest_frames = self._render_all()
+                self._current_seed = int(seed)
+                return {
+                    "seed": int(seed), "placements": sampled, "scene_attempts": attempt,
+                    "placement_surface": "tea_tray", "bounds_method": "rotated_body_aabb",
+                    "edge_margin_m": self.config["randomization"]["edge_margin_m"],
+                    "settled": report,
+                }
+            raise PlacementError(
+                f"no valid tea_tray layout for seed {seed} after {attempts} scene attempts: "
+                + "; ".join(last_issues)
             )
-            for _ in range(max(0, settle_steps)):
-                mujoco.mj_step(self.model, self.data)
-            self._current_seed = int(seed)
-            self._latest_frames = self._render_all()
-            return {"seed": int(seed), "placements": sampled}
 
     def _render_camera(self, camera_name: str) -> dict[str, np.ndarray]:
         self.renderer.disable_depth_rendering()

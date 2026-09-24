@@ -89,7 +89,7 @@ uv run teaware-mj --config my_scene.yaml scene --output scene.generated.xml
 
 YAML 中的长度均为米、角度为度。主要字段：
 
-- `simulation`: MuJoCo timestep、落稳时间、episode 时长和采样帧率；
+- `simulation`: MuJoCo timestep、最短落稳时间、落稳超时、episode 时长和采样帧率；
 - `renderer`: 所有相机的离屏渲染宽高；
 - `policy`: policy 类型、任务文本、控制频率和 action horizon；
 - `table`: 茶桌中心和完整尺寸；
@@ -97,7 +97,37 @@ YAML 中的长度均为米、角度为度。主要字段：
 - `robots`: 一台或多台机械臂的 id、手型、左右手、基座位姿、arm/hand home joint 和运动幅度；
 - `cameras`: 固定相机位置、观察目标和垂直视场角；
 - `objects`: 茶具 preset、可选 `asset_id`、颜色与平面随机范围；
-- `randomization`: 物体中心最小间距和最大重采样次数。
+- `randomization`: 茶盘边缘余量、物体间距和最大重采样次数。
+
+所有茶具初始位置均约束在绿色 `tea_tray` 上。采样器读取编译后茶盘的实际边界，
+用茶具全部视觉及碰撞几何（包括壶嘴、把手）的包围盒计算占地，先采样 yaw，
+再将该朝向允许的中心范围与 YAML 中的 x/y 范围取交集。尺寸较大的茶具优先摆放，
+输出仍保持 YAML 对象顺序。包围盒检查是保守的，可能拒绝一部分实际上可放下的紧密布局。
+
+```yaml
+randomization:
+  edge_margin_m: 0.02            # 整个茶具外形到茶盘边缘至少 2 cm
+  minimum_object_distance: 0.13  # 茶具参考点之间至少 13 cm
+  minimum_object_gap_m: 0.01     # 两个占地包围盒之间至少 1 cm
+  max_placement_attempts: 200    # 每件茶具的候选尝试上限
+  max_scene_attempts: 20         # 整组布局的重采样上限
+simulation:
+  settle_s: 0.5                 # 最短落稳时间
+  settle_timeout_s: 1.5         # 每组布局的落稳时间上限
+```
+
+未配置边缘余量和外形间距时，分别使用 0.02 m 和 0.01 m。
+落稳阶段按实际位姿重新检查边界和物体间距，同时要求茶具接触茶盘、没有接触其他物体、
+地板或机器人，倾斜不超过 10 度，线速度不超过 0.02 m/s，角速度不超过 0.2 rad/s。
+这些条件连续满足 0.1 秒且达到 `settle_s` 后才接受布局。
+落稳失败会重新生成整组布局；用尽尝试次数后明确报错，不接受越界状态，也不放宽余量。
+这些约束用于初始化，不会把茶具焊接或锁定在茶盘上，后续 policy 仍可抓取和移动它们。
+
+`randomize` 返回值及 episode manifest 的 `randomization` 同时记录采样位置和 `settled`
+实际位姿、边缘余量、倾斜角、速度、支撑状态与 `scene_attempts`。相同配置和 seed 可复现
+相同布局；采样算法更新后，同一 seed 的位置会与旧版本不同。新配置哈希也会改变，
+请使用新的 dataset 目录。`scene` 命令只导出模型结构，不会执行随机化或落稳；
+已经导出的查看器快照需要从新的初始化状态重新导出。
 
 配置在启动时严格校验。向已有 dataset 写入时，配置哈希必须与 `dataset.json` 一致，避免把不同相机、分辨率或物理参数的数据静默混在一起。需要换配置时应使用新的 dataset 目录。
 

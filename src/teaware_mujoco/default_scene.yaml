@@ -34,6 +34,9 @@ robots:
     hand_motion_amplitude: [0.0]
 
 randomization:
+  edge_margin_m: 0.02
+  minimum_object_gap_m: 0.01
+  max_scene_attempts: 20
   minimum_object_distance: 0.13
   max_placement_attempts: 200
 
